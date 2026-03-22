@@ -14,6 +14,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set date
+        run: echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -25,7 +28,7 @@ jobs:
       - name: Generate report
         run: |
           mkdir -p reports
-          python3 stock_report.py --output reports/report_$(date +%Y%m%d).txt
+          python3 stock_report.py --output reports/report_${{ env.TODAY }}.txt
 
       - name: Commit and push report
         run: |
@@ -33,3 +36,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add reports/
           git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) 투자 보고서" && git push)
+
+      - name: Send email notification
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_ADDRESS }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "투자 보고서 - ${{ env.TODAY }}"
+          to: pooq1553@gmail.com
+          from: 투자보고서봇
+          body: |
+            오늘의 투자 보고서가 생성되었습니다.
+            첨부된 파일을 확인하세요.
+          attachments: reports/report_${{ env.TODAY }}.txt
