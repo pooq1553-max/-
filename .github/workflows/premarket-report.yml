@@ -1,0 +1,57 @@
+name: US Pre-Market Report
+
+on:
+  schedule:
+    # 미국 프리마켓 스캔: UTC 13:00 = KST 22:00 = ET 08:00 (본장 09:30 전)
+    - cron: '0 13 * * 1-5'
+  workflow_dispatch:  # 수동 실행도 가능
+
+permissions:
+  contents: write
+
+jobs:
+  premarket-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set date
+        run: echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas
+
+      - name: Generate pre-market report
+        run: |
+          mkdir -p reports
+          python3 stock_report.py --premarket --output reports/premarket_${{ env.TODAY }}.txt
+
+      - name: Commit and push report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git diff --staged --quiet || (git commit -m "premarket: $(date +%Y-%m-%d) 프리마켓 보고서" && git push)
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_ADDRESS }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "[프리마켓] 52주 신고가 스캔 - ${{ env.TODAY }}"
+          to: pooq1553@gmail.com
+          from: 투자보고서봇
+          body: |
+            미국 프리마켓 52주 신고가 스캔 결과입니다.
+            본장 개장 전 참고하세요.
+          attachments: reports/premarket_${{ env.TODAY }}.txt
