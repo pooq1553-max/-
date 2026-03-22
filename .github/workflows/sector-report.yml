@@ -1,0 +1,90 @@
+name: Sector Performance Report
+
+on:
+  schedule:
+    # 한국 장마감 30분 후: UTC 07:00 = KST 16:00
+    - cron: '0 7 * * 1-5'
+    # 미국 장마감 30분 후: UTC 20:30 = ET 16:30 (서머타임)
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      market:
+        description: '시장 선택'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - US
+          - KR
+          - ALL
+
+permissions:
+  contents: write
+
+jobs:
+  sector-report:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set date and market
+        run: |
+          echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
+          HOUR=$(date -u +%H)
+          # 수동 실행 시 입력값 사용, 스케줄 시 시간으로 판별
+          if [ -n "${{ inputs.market }}" ]; then
+            echo "MARKET=${{ inputs.market }}" >> $GITHUB_ENV
+          elif [ "$HOUR" -lt 12 ]; then
+            echo "MARKET=KR" >> $GITHUB_ENV
+          else
+            echo "MARKET=US" >> $GITHUB_ENV
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas
+
+      - name: Generate sector report
+        run: |
+          mkdir -p reports
+          python3 stock_report.py --sector --market ${{ env.MARKET }} \
+            --output reports/sector_${{ env.MARKET }}_${{ env.TODAY }}.txt
+
+      - name: Commit and push report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git diff --staged --quiet || (git commit -m "sector: $(date +%Y-%m-%d) ${{ env.MARKET }} 섹터 보고서" && git push)
+
+      - name: Determine email subject
+        run: |
+          if [ "${{ env.MARKET }}" = "KR" ]; then
+            echo "SUBJECT=[국장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          elif [ "${{ env.MARKET }}" = "US" ]; then
+            echo "SUBJECT=[미장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          else
+            echo "SUBJECT=[섹터 분석] 장마감 성과 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          fi
+
+      - name: Send email notification
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_ADDRESS }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: ${{ env.SUBJECT }}
+          to: pooq1553@gmail.com
+          from: 투자보고서봇
+          body: |
+            ${{ env.MARKET }} 시장 장마감 후 섹터별 성과 분석 보고서입니다.
+            어떤 섹터가 강했는지, 자금 흐름을 확인하세요.
+          attachments: reports/sector_${{ env.MARKET }}_${{ env.TODAY }}.txt

@@ -120,6 +120,70 @@ NAMES = {
     "237690.KQ": "에스티팜", "365270.KQ": "큐셀즈", "369370.KQ": "블래드바이오사이언스",
 }
 
+# ─── 섹터 매핑 ───
+US_SECTORS = {
+    "반도체":     ["NVDA","AMD","INTC","QCOM","TXN","AMAT","LRCX","KLAC","AVGO","MRVL",
+                   "ARM","SMCI","NXPI","ON","MCHP","ADI","MU","SNPS","CDNS"],
+    "빅테크":     ["AAPL","MSFT","GOOGL","AMZN","META","TSLA"],
+    "소프트웨어":  ["CRM","ADBE","ORCL","NOW","INTU","WDAY","TEAM","SNOW","ANSS"],
+    "사이버보안":  ["CRWD","PANW","FTNT","ZS","NET"],
+    "클라우드/SaaS":["DDOG","SHOP","CSCO","IBM"],
+    "핀테크/결제": ["V","MA","SQ","COIN","AXP","ICE","CME","SPGI","MCO","MSCI"],
+    "금융":       ["JPM","BAC","WFC","GS","MS","C","BLK","SCHW"],
+    "헬스케어":   ["UNH","JNJ","MRK","ABBV","LLY","PFE","REGN","AMGN","GILD","VRTX",
+                   "MRNA","BMY","CI"],
+    "의료기기":   ["TMO","DHR","SYK","BSX","ABT","ISRG","ZTS","IDXX","DXCM"],
+    "소비재":     ["PG","PEP","KO","COST","MCD","WMT","HD"],
+    "미디어/엔터": ["NFLX","DIS","CMCSA"],
+    "통신":       ["T","VZ","TMUS"],
+    "플랫폼":     ["PLTR","UBER","ABNB","DASH"],
+    "에너지":     ["XOM","CVX"],
+    "산업재":     ["CAT","DE","HON","GE","RTX","BA","LMT","NOC","TT","IR"],
+    "운송/물류":  ["UPS","FDX"],
+    "리츠/유틸":  ["AMT","PLD","CCI","EQIX","NEE","DUK","SO"],
+    "기타":       ["BRK-B","DELL","APH","CTAS","ADP","ROP","ACN"],
+}
+
+KR_SECTORS = {
+    "반도체":     ["005930.KS","000660.KS","042700.KS","009150.KS",
+                   "067310.KQ","036930.KQ","095340.KQ","039030.KQ","240810.KQ",
+                   "403870.KQ","058470.KQ","022100.KQ","307950.KQ"],
+    "2차전지":    ["051910.KS","006400.KS","003670.KS",
+                   "247540.KQ","086520.KQ","078600.KQ","097520.KQ","278280.KQ"],
+    "자동차":     ["005380.KS","000270.KS","012330.KS","161390.KS",
+                   "064350.KQ"],
+    "조선/중공업": ["009540.KS","010140.KS","010620.KS","329180.KS",
+                    "267250.KS","272210.KS","047810.KS"],
+    "금융":       ["055550.KS","105560.KS","086790.KS","316140.KS","024110.KS",
+                   "000810.KS","006800.KS","071050.KS","138040.KS","005830.KS",
+                   "032830.KS"],
+    "인터넷/플랫폼":["035420.KS","035720.KS",
+                     "377300.KQ","323410.KQ","293490.KQ"],
+    "바이오":     ["068270.KS","207940.KS","128940.KS","000100.KS","326030.KS",
+                   "302440.KS",
+                   "196170.KQ","145020.KQ","091990.KQ","137310.KQ","298380.KQ",
+                   "048410.KQ","174900.KQ","208710.KQ","028300.KQ","294090.KQ",
+                   "237690.KQ","195940.KQ","369370.KQ"],
+    "엔터/미디어": ["041510.KQ","035900.KQ","352820.KQ","251270.KQ",
+                    "263750.KQ","112040.KQ"],
+    "철강/화학":  ["005490.KS","011170.KS","011780.KS","010950.KS",
+                   "004020.KS","009830.KS"],
+    "건설/인프라": ["000720.KS","006360.KS","034020.KS","088980.KS"],
+    "유틸/에너지": ["015760.KS","036460.KS","096770.KS","052690.KS",
+                    "365270.KQ","336260.KQ"],
+    "통신":       ["030200.KS","017670.KS","018260.KS"],
+    "소비재/유통": ["028260.KS","033780.KS","090430.KS","002790.KS",
+                    "021240.KS","023530.KS","008770.KS","097950.KS",
+                    "383220.KQ","214150.KQ","257720.KQ"],
+    "IT서비스":   ["402340.KS","259960.KS","036570.KS",
+                   "042000.KQ","053800.KQ","043150.KQ","328130.KQ",
+                   "090460.KQ","140860.KQ","348210.KQ","299030.KQ",
+                   "222080.KQ","041190.KQ"],
+    "기타":       ["034730.KS","078930.KS","180640.KS","035250.KS",
+                   "010130.KS","047050.KS","100840.KS","192820.KS",
+                   "011200.KS","357780.KQ"],
+}
+
 
 def fmt_cap(v, mkt):
     if pd.isna(v) or v <= 0:
@@ -399,6 +463,197 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30):
     return buf.getvalue()
 
 
+def scan_sector(symbols, mkt, sector_map):
+    """섹터별 당일 등락률 스캔."""
+    print(f"  [{mkt}] 섹터 성과 스캔 중...", file=sys.stderr)
+    rows = []
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym)
+            fi = t.fast_info
+            price = getattr(fi, "last_price", 0) or 0
+            prev = getattr(fi, "previous_close", 0) or price
+            chg = ((price - prev) / prev * 100) if prev else 0
+            mc = getattr(fi, "market_cap", 0) or 0
+            vol = getattr(fi, "last_volume", 0) or 0
+            tv = price * vol
+            # 섹터 찾기
+            sector = "기타"
+            for s, syms_list in sector_map.items():
+                if sym in syms_list:
+                    sector = s
+                    break
+            rows.append(dict(sym=sym, price=price, chg=chg, mc=mc, tv=tv, sector=sector, mkt=mkt))
+        except Exception:
+            continue
+    return pd.DataFrame(rows)
+
+
+def generate_sector_report(all_data, mkt_label):
+    """섹터별 성과 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 70)
+    w(f"  {mkt_label} 섹터별 성과 보고서")
+    w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준 (장마감 후)")
+    w("=" * 70)
+    w()
+
+    if all_data.empty:
+        w("  데이터 없음.")
+        return buf.getvalue()
+
+    # 섹터별 집계: 시총 가중 평균 등락률 + 단순 평균
+    sector_stats = []
+    for sector in all_data["sector"].unique():
+        sdf = all_data[all_data["sector"] == sector]
+        simple_avg = sdf["chg"].mean()
+        total_mc = sdf["mc"].sum()
+        # 시총 가중 평균
+        if total_mc > 0:
+            weighted_avg = (sdf["chg"] * sdf["mc"]).sum() / total_mc
+        else:
+            weighted_avg = simple_avg
+        total_tv = sdf["tv"].sum()
+        n = len(sdf)
+        top_stock = sdf.loc[sdf["chg"].idxmax()]
+        worst_stock = sdf.loc[sdf["chg"].idxmin()]
+        sector_stats.append(dict(
+            sector=sector, weighted_avg=weighted_avg, simple_avg=simple_avg,
+            total_tv=total_tv, n=n, total_mc=total_mc,
+            top_sym=top_stock["sym"], top_chg=top_stock["chg"],
+            worst_sym=worst_stock["sym"], worst_chg=worst_stock["chg"],
+        ))
+
+    sdf = pd.DataFrame(sector_stats).sort_values("weighted_avg", ascending=False)
+    mkt = all_data["mkt"].iloc[0]
+
+    # ─── 섹터 순위표 ───
+    w("-" * 70)
+    w(f"  {'순위':>4}  {'섹터':<12}  {'등락률':>8}  {'거래대금':>12}  {'종목수':>4}")
+    w("-" * 70)
+
+    for rank, (_, r) in enumerate(sdf.iterrows(), 1):
+        arrow = "▲" if r["weighted_avg"] > 0 else "▼" if r["weighted_avg"] < 0 else "─"
+        w(f"  {rank:>4}  {r['sector']:<12}  {arrow}{abs(r['weighted_avg']):>6.2f}%"
+          f"  {fmt_tv(r['total_tv'], mkt):>12}  {r['n']:>4}개")
+
+    w()
+
+    # ─── 강세 섹터 상세 ───
+    strong = sdf[sdf["weighted_avg"] > 0]
+    weak = sdf[sdf["weighted_avg"] < 0]
+
+    if not strong.empty:
+        w("=" * 70)
+        w("  강세 섹터 상세")
+        w("=" * 70)
+        w()
+        for _, r in strong.iterrows():
+            w(f"  [{r['sector']}] +{r['weighted_avg']:.2f}%")
+            top_name = get_name(r["top_sym"])
+            w(f"    최고: {top_name} ({r['top_chg']:+.2f}%)")
+            # 해당 섹터 전 종목
+            sec_stocks = all_data[all_data["sector"] == r["sector"]].sort_values("chg", ascending=False)
+            for _, st in sec_stocks.iterrows():
+                name = get_name(st["sym"])
+                ticker = st["sym"].replace(".KS", "").replace(".KQ", "")
+                bar = "+" * min(int(abs(st["chg"])), 20) if st["chg"] > 0 else "-" * min(int(abs(st["chg"])), 20)
+                w(f"      {name:<16} {st['chg']:+6.2f}%  {bar}")
+            w()
+
+    if not weak.empty:
+        w("=" * 70)
+        w("  약세 섹터 상세")
+        w("=" * 70)
+        w()
+        for _, r in weak.iterrows():
+            w(f"  [{r['sector']}] {r['weighted_avg']:.2f}%")
+            worst_name = get_name(r["worst_sym"])
+            w(f"    최저: {worst_name} ({r['worst_chg']:+.2f}%)")
+            sec_stocks = all_data[all_data["sector"] == r["sector"]].sort_values("chg", ascending=False)
+            for _, st in sec_stocks.iterrows():
+                name = get_name(st["sym"])
+                bar = "+" * min(int(abs(st["chg"])), 20) if st["chg"] > 0 else "-" * min(int(abs(st["chg"])), 20)
+                w(f"      {name:<16} {st['chg']:+6.2f}%  {bar}")
+            w()
+
+    # ─── 요약 코멘트 ───
+    w("=" * 70)
+    w("  오늘의 시장 요약")
+    w("=" * 70)
+    w()
+
+    mkt_avg = all_data["chg"].mean()
+    up_cnt = len(all_data[all_data["chg"] > 0])
+    dn_cnt = len(all_data[all_data["chg"] < 0])
+    total = len(all_data)
+
+    w(f"  전체 평균 등락률: {mkt_avg:+.2f}%")
+    w(f"  상승/하락: {up_cnt}개 상승 vs {dn_cnt}개 하락 (총 {total}개)")
+    w()
+
+    if not strong.empty:
+        top_sector = strong.iloc[0]
+        w(f"  오늘의 최강 섹터: {top_sector['sector']} (+{top_sector['weighted_avg']:.2f}%)")
+    if not weak.empty:
+        bot_sector = weak.iloc[-1]
+        w(f"  오늘의 최약 섹터: {bot_sector['sector']} ({bot_sector['weighted_avg']:.2f}%)")
+    w()
+
+    # 섹터 로테이션 힌트
+    if len(strong) >= 2:
+        top_names = ", ".join(strong["sector"].head(3).tolist())
+        w(f"  자금 유입 섹터: {top_names}")
+    if len(weak) >= 2:
+        bot_names = ", ".join(weak["sector"].tail(3).tolist())
+        w(f"  자금 이탈 섹터: {bot_names}")
+    w()
+
+    w("-" * 70)
+    w("  주의: 본 보고서는 데이터 기반 자동 생성이며 투자 권유가 아닙니다.")
+    w("-" * 70)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_sector(market="ALL", output=None):
+    """섹터 보고서 실행."""
+    reports = []
+
+    if market in ("US", "ALL"):
+        us_syms = [s for syms in US_SECTORS.values() for s in syms]
+        us_data = scan_sector(us_syms, "US", US_SECTORS)
+        if not us_data.empty:
+            reports.append(generate_sector_report(us_data, "미국"))
+
+    if market in ("KR", "ALL"):
+        kr_syms = [s for syms in KR_SECTORS.values() for s in syms]
+        kr_data = scan_sector(kr_syms, "KR", KR_SECTORS)
+        if not kr_data.empty:
+            reports.append(generate_sector_report(kr_data, "한국"))
+
+    full_report = "\n".join(reports) if reports else "섹터 데이터 없음.\n"
+    print(full_report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"sector_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(full_report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def scan_premarket(symbols):
     """미국 프리마켓 52주 신고가 근접 종목 스캔."""
     print(f"  [프리마켓] {len(symbols)}개 종목 스캔 중...", file=sys.stderr)
@@ -591,9 +846,13 @@ def main():
                         help="출력 파일명 (기본: report_YYYYMMDD_HHMM.txt)")
     parser.add_argument("--premarket", action="store_true",
                         help="미국 프리마켓 52주 신고가 스캔")
+    parser.add_argument("--sector", action="store_true",
+                        help="섹터별 성과 보고서 생성")
     args = parser.parse_args()
     if args.premarket:
         run_premarket(output=args.output)
+    elif args.sector:
+        run_sector(market=args.market, output=args.output)
     else:
         run_report(market=args.market, output=args.output)
 
