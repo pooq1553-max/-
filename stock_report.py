@@ -8,6 +8,7 @@ pip install yfinance pandas schedule
   python stock_report.py --market US    # US만
   python stock_report.py --market KR    # 한국만
   python stock_report.py --output report.txt  # 파일로 저장
+  python stock_report.py --premarket    # 미국 프리마켓 52주 신고가 스캔
 """
 import argparse
 import warnings
@@ -398,6 +399,156 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30):
     return buf.getvalue()
 
 
+def scan_premarket(symbols):
+    """미국 프리마켓 52주 신고가 근접 종목 스캔."""
+    print(f"  [프리마켓] {len(symbols)}개 종목 스캔 중...", file=sys.stderr)
+    rows = []
+    for i, sym in enumerate(symbols):
+        try:
+            t = yf.Ticker(sym)
+            fi = t.fast_info
+            mc = getattr(fi, "market_cap", 0) or 0
+            if mc < 5e9:
+                continue
+            # 프리마켓 가격
+            info = t.info
+            pre_price = info.get("preMarketPrice", 0) or 0
+            if pre_price <= 0:
+                continue
+            prev_close = getattr(fi, "previous_close", 0) or info.get("regularMarketPreviousClose", 0) or 0
+            h52 = getattr(fi, "year_high", 0) or 0
+            if h52 <= 0:
+                continue
+
+            pct_h = (pre_price / h52 * 100)
+            chg = ((pre_price - prev_close) / prev_close * 100) if prev_close else 0
+            pre_vol = info.get("preMarketVolume", 0) or 0
+
+            rows.append(dict(
+                sym=sym, pre_price=pre_price, prev_close=prev_close,
+                chg=chg, h52=h52, pct_h=pct_h, mc=mc, pre_vol=pre_vol,
+            ))
+            if (i + 1) % 20 == 0:
+                print(f"  ... {i+1}/{len(symbols)}", file=sys.stderr)
+        except Exception:
+            continue
+    return pd.DataFrame(rows)
+
+
+def generate_premarket_report(df):
+    """프리마켓 52주 신고가 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 70)
+    w("  미국 프리마켓 52주 신고가 스캔")
+    w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준 (본장 개장 전)")
+    w("=" * 70)
+    w()
+
+    if df.empty:
+        w("  프리마켓 데이터가 없습니다. (프리마켓 시간이 아닐 수 있습니다)")
+        return buf.getvalue()
+
+    # 52주 고가 대비 95% 이상만 필터
+    hits = df[df["pct_h"] >= 95].sort_values("pct_h", ascending=False)
+    watch = df[(df["pct_h"] >= 90) & (df["pct_h"] < 95)].sort_values("pct_h", ascending=False)
+
+    if hits.empty and watch.empty:
+        w("  프리마켓에서 52주 고가 근접 종목이 없습니다.")
+        w()
+        # 상위 10개라도 보여줌
+        top = df.sort_values("pct_h", ascending=False).head(10)
+        if not top.empty:
+            w("  [참고] 52주 고가 대비 상위 10종목:")
+            w()
+            for _, r in top.iterrows():
+                name = get_name(r["sym"])
+                w(f"    {name} ({r['sym']}): ${r['pre_price']:,.2f}  "
+                  f"({r['chg']:+.2f}%)  고가대비 {r['pct_h']:.1f}%")
+            w()
+        return buf.getvalue()
+
+    w(f"  52주 신고가 근접/돌파: {len(hits)}개  |  관찰 대상: {len(watch)}개")
+    w()
+
+    if not hits.empty:
+        w("-" * 70)
+        w("  [52주 신고가 돌파/근접] (95% 이상)")
+        w("-" * 70)
+        w()
+        for _, r in hits.iterrows():
+            name = get_name(r["sym"])
+            status = "신고가 돌파!" if r["pct_h"] >= 100 else "신고가 근접"
+            w(f"  * {name} ({r['sym']})  -- {status}")
+            w(f"      프리마켓: ${r['pre_price']:,.2f}  |  전일종가: ${r['prev_close']:,.2f}  |  등락: {r['chg']:+.2f}%")
+            w(f"      52주 고가: ${r['h52']:,.2f}  |  고가 대비: {r['pct_h']:.1f}%")
+            w(f"      시가총액: {fmt_cap(r['mc'], 'US')}")
+            if r["pct_h"] >= 100:
+                w(f"      -> 프리마켓에서 52주 신고가 갱신! 본장 갭업 출발 가능성")
+            elif r["pct_h"] >= 98:
+                w(f"      -> 본장에서 52주 신고가 돌파 가능성 높음")
+            else:
+                w(f"      -> 52주 고가권 진입, 본장 흐름 주시")
+            w()
+
+    if not watch.empty:
+        w("-" * 70)
+        w("  [관찰 대상] (90~95%)")
+        w("-" * 70)
+        w()
+        for _, r in watch.iterrows():
+            name = get_name(r["sym"])
+            w(f"  - {name} ({r['sym']}): ${r['pre_price']:,.2f}  "
+              f"({r['chg']:+.2f}%)  고가대비 {r['pct_h']:.1f}%")
+        w()
+
+    w("=" * 70)
+    w("  본장 매매 전략")
+    w("=" * 70)
+    w()
+    if not hits.empty:
+        w("  [신고가 돌파/근접 종목]")
+        for _, r in hits.iterrows():
+            name = get_name(r["sym"])
+            if r["pct_h"] >= 100:
+                w(f"    - {name}: 갭업 출발 예상 -> 시초가 돌파 시 추격 매수 or 눌림목 대기")
+            else:
+                w(f"    - {name}: 신고가 {r['pct_h']:.1f}% -> 돌파 시 추세 추종, 실패 시 관망")
+        w()
+
+    w("-" * 70)
+    w("  주의: 프리마켓 데이터 기반이며, 본장에서 방향이 바뀔 수 있습니다.")
+    w("  투자 결정은 본인의 판단과 책임 하에 이루어져야 합니다.")
+    w("-" * 70)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_premarket(output=None):
+    """프리마켓 보고서 실행."""
+    df = scan_premarket(US)
+    report = generate_premarket_report(df)
+
+    print(report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"premarket_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def run_report(market="ALL", output=None):
     """보고서 실행."""
     jobs = []
@@ -438,8 +589,13 @@ def main():
                         help="시장 선택 (기본: ALL)")
     parser.add_argument("--output", "-o", type=str, default=None,
                         help="출력 파일명 (기본: report_YYYYMMDD_HHMM.txt)")
+    parser.add_argument("--premarket", action="store_true",
+                        help="미국 프리마켓 52주 신고가 스캔")
     args = parser.parse_args()
-    run_report(market=args.market, output=args.output)
+    if args.premarket:
+        run_premarket(output=args.output)
+    else:
+        run_report(market=args.market, output=args.output)
 
 
 if __name__ == "__main__":
