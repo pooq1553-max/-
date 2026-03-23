@@ -2,9 +2,21 @@ name: Daily Stock Report
 
 on:
   schedule:
-    # 평일 오후 4시 (KST) = UTC 07:00
+    # 국장 장마감 30분 후: UTC 07:00 = KST 16:00
     - cron: '0 7 * * 1-5'
-  workflow_dispatch:  # 수동 실행도 가능
+    # 미장 장마감 30분 후: UTC 20:30 = ET 16:30 (서머타임)
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      market:
+        description: '시장 선택'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - US
+          - KR
+          - ALL
 
 permissions:
   contents: write
@@ -17,8 +29,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set date
-        run: echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
+      - name: Set date and market
+        run: |
+          echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
+          HOUR=$(date -u +%H)
+          # 수동 실행 시 입력값 사용, 스케줄 시 시간으로 판별
+          if [ -n "${{ inputs.market }}" ]; then
+            echo "MARKET=${{ inputs.market }}" >> $GITHUB_ENV
+          elif [ "$HOUR" -lt 12 ]; then
+            echo "MARKET=KR" >> $GITHUB_ENV
+          else
+            echo "MARKET=US" >> $GITHUB_ENV
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,14 +53,25 @@ jobs:
       - name: Generate report
         run: |
           mkdir -p reports
-          python3 stock_report.py --output reports/report_${{ env.TODAY }}.txt
+          python3 stock_report.py --market ${{ env.MARKET }} \
+            --output reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
 
       - name: Commit and push report
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add reports/
-          git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) 투자 보고서" && git push)
+          git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) ${{ env.MARKET }} 투자 보고서" && git push)
+
+      - name: Determine email subject
+        run: |
+          if [ "${{ env.MARKET }}" = "KR" ]; then
+            echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          elif [ "${{ env.MARKET }}" = "US" ]; then
+            echo "SUBJECT=[미장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          else
+            echo "SUBJECT=[투자] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          fi
 
       - name: Send email notification
         if: always()
@@ -48,10 +81,9 @@ jobs:
           server_port: 465
           username: ${{ secrets.GMAIL_ADDRESS }}
           password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "투자 보고서 - ${{ env.TODAY }}"
+          subject: ${{ env.SUBJECT }}
           to: pooq1553@gmail.com
           from: 투자보고서봇
           body: |
-            오늘의 투자 보고서가 생성되었습니다.
-            첨부된 파일을 확인하세요.
-          attachments: reports/report_${{ env.TODAY }}.txt
+            ${{ env.MARKET }} 시장 장마감 후 52주 신고가 보고서입니다.
+          attachments: reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
