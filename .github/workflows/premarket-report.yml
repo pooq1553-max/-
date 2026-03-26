@@ -2,8 +2,8 @@ name: US Pre-Market Report
 
 on:
   schedule:
-    # 미국 프리마켓 스캔: UTC 13:00 = KST 22:00 = ET 08:00 (본장 09:30 전)
-    - cron: '0 13 * * 1-5'
+    # 프리마켓: UTC 12:30 트리거 → 딜레이 감안 KST 22시쯤 도착
+    - cron: '30 12 * * 1-5'
   workflow_dispatch:  # 수동 실행도 가능
 
 permissions:

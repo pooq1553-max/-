@@ -2,10 +2,10 @@ name: Sector Performance Report
 
 on:
   schedule:
-    # 한국 장마감 30분 후: UTC 07:00 = KST 16:00
-    - cron: '0 7 * * 1-5'
-    # 미국 장마감 30분 후: UTC 20:30 = ET 16:30 (서머타임)
-    - cron: '30 20 * * 1-5'
+    # 국장: UTC 06:30 트리거 → 딜레이 감안 KST 16시쯤 도착
+    - cron: '30 6 * * 1-5'
+    # 미장: UTC 20:00 트리거 → 딜레이 감안 ET 16:30쯤 도착
+    - cron: '0 20 * * 1-5'
   workflow_dispatch:
     inputs:
       market:
