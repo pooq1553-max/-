@@ -33,7 +33,7 @@ jobs:
         run: |
           echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
           HOUR=$(date -u +%H)
-          if [ -n "${{ inputs.market }}" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "MARKET=${{ inputs.market }}" >> $GITHUB_ENV
           elif [ "$HOUR" -lt 12 ]; then
             echo "MARKET=KR" >> $GITHUB_ENV
@@ -70,7 +70,7 @@ jobs:
           git add reports/
           git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) ${{ env.MARKET }} 투자 보고서" && git push)
 
-      - name: Determine email subject
+      - name: Set email subject
         run: |
           if [ "${{ env.MARKET }}" = "KR" ]; then
             echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
@@ -93,5 +93,4 @@ jobs:
           from: 투자보고서봇
           body: |
             ${{ env.MARKET }} 시장 장마감 후 52주 신고가 보고서입니다.
-            차트: 지수 + Fear & Greed 오실레이터
           attachments: ${{ env.ATTACHMENTS }}
