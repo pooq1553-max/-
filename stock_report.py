@@ -221,6 +221,179 @@ def fmt_price(v, mkt):
     return f"{v:,.0f}원"
 
 
+# ─── 리스크 지표 ───
+RISK_TICKERS = {
+    "VIX":      "^VIX",       # 공포지수
+    "미국10Y":   "^TNX",       # 미국 10년 국채 금리
+    "달러인덱스": "DX-Y.NYB",  # 달러 인덱스
+    "금":        "GC=F",       # 금 선물
+    "원/달러":   "KRW=X",      # 원달러 환율
+    "VKOSPI":   "^KS200VIX",  # 한국 변동성지수 (없으면 skip)
+}
+
+
+def scan_risk_indicators(market="ALL"):
+    """시장 리스크 지표 + 주요 선물/지수 스캔."""
+    results = {}
+    tickers_to_scan = {}
+
+    if market in ("US", "ALL"):
+        tickers_to_scan.update({
+            "VIX":        "^VIX",       # 공포지수
+            "미국10Y":     "^TNX",       # 10년 국채 금리
+            "달러인덱스":   "DX-Y.NYB",  # 달러 인덱스
+            "금":          "GC=F",       # 금 선물
+            "S&P500":     "^GSPC",      # S&P 500
+            "나스닥":      "^IXIC",      # 나스닥 종합
+            "S&P선물":     "ES=F",       # S&P 500 선물
+            "나스닥선물":   "NQ=F",       # 나스닥 100 선물
+        })
+    if market in ("KR", "ALL"):
+        tickers_to_scan.update({
+            "원/달러":     "KRW=X",      # 원달러 환율
+            "코스피":      "^KS11",      # 코스피 지수
+            "코스닥":      "^KQ11",      # 코스닥 지수
+            "코스피200선물":"KS200.KS",   # 코스피200 선물 (ETF 대용)
+        })
+
+    for name, sym in tickers_to_scan.items():
+        try:
+            t = yf.Ticker(sym)
+            hist = t.history(period="5d")
+            if hist.empty:
+                continue
+            current = hist["Close"].iloc[-1]
+            prev = hist["Close"].iloc[-2] if len(hist) >= 2 else current
+            chg = ((current - prev) / prev * 100) if prev else 0
+            # 5일 전 대비 변화도
+            first = hist["Close"].iloc[0] if len(hist) >= 2 else current
+            chg_5d = ((current - first) / first * 100) if first else 0
+            results[name] = dict(value=current, chg=chg, chg_5d=chg_5d)
+        except Exception:
+            continue
+
+    return results
+
+
+def format_risk_section(risk_data, market="ALL"):
+    """리스크 지표 섹션 텍스트 생성."""
+    if not risk_data:
+        return ""
+
+    buf = StringIO()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 70)
+    w("  시장 리스크 대시보드")
+    w("=" * 70)
+    w()
+
+    # 구분해서 출력
+    risk_keys = ["VIX", "미국10Y", "달러인덱스", "금", "원/달러"]
+    index_keys = ["S&P500", "나스닥", "코스피", "코스닥"]
+    futures_keys = ["S&P선물", "나스닥선물", "코스피200선물"]
+
+    def fmt_val(name, val):
+        if name == "VIX":
+            return f"{val:.2f}"
+        if name == "미국10Y":
+            return f"{val:.3f}%"
+        if name in ("달러인덱스",):
+            return f"{val:.2f}"
+        if name == "금":
+            return f"${val:,.1f}"
+        if name == "원/달러":
+            return f"{val:,.1f}원"
+        if name in ("S&P500", "나스닥"):
+            return f"{val:,.1f}"
+        if name in ("코스피", "코스닥"):
+            return f"{val:,.2f}"
+        if "선물" in name:
+            return f"{val:,.1f}"
+        return f"{val:.2f}"
+
+    def print_group(title, keys):
+        items = [(k, risk_data[k]) for k in keys if k in risk_data]
+        if not items:
+            return
+        w(f"  [{title}]")
+        for name, d in items:
+            val = d["value"]
+            chg = d["chg"]
+            chg_5d = d["chg_5d"]
+            arrow = "▲" if chg > 0 else "▼" if chg < 0 else "─"
+            w(f"    {name:<12}  {fmt_val(name, val):>12}  "
+              f"{arrow}{abs(chg):>5.2f}% (전일)  |  5일: {chg_5d:+.2f}%")
+        w()
+
+    print_group("리스크 지표", risk_keys)
+    print_group("주요 지수", index_keys)
+    print_group("선물", futures_keys)
+
+    # 리스크 판단
+    warnings = []
+    vix = risk_data.get("VIX", {})
+    if vix and vix.get("value", 0) >= 30:
+        warnings.append(f"⚠ VIX {vix['value']:.1f} - 공포 구간! 변동성 극대화 주의")
+    elif vix and vix.get("value", 0) >= 25:
+        warnings.append(f"⚠ VIX {vix['value']:.1f} - 불안 구간, 포지션 축소 고려")
+    elif vix and vix.get("value", 0) <= 15:
+        warnings.append(f"  VIX {vix['value']:.1f} - 안정 구간, 시장 낙관적")
+
+    tnx = risk_data.get("미국10Y", {})
+    if tnx and tnx.get("chg", 0) > 3:
+        warnings.append(f"⚠ 미국10Y 금리 급등 ({tnx['chg']:+.2f}%) - 성장주 하락 압력")
+    elif tnx and tnx.get("value", 0) >= 5.0:
+        warnings.append(f"⚠ 미국10Y {tnx['value']:.2f}% - 고금리 지속, 밸류에이션 부담")
+
+    krw = risk_data.get("원/달러", {})
+    if krw and krw.get("value", 0) >= 1400:
+        warnings.append(f"⚠ 원/달러 {krw['value']:,.0f}원 - 원화 약세, 외국인 매도 압력")
+    if krw and krw.get("chg", 0) > 1:
+        warnings.append(f"⚠ 원/달러 급등 ({krw['chg']:+.2f}%) - 환율 불안")
+
+    gold = risk_data.get("금", {})
+    if gold and gold.get("chg_5d", 0) > 5:
+        warnings.append(f"⚠ 금 5일간 {gold['chg_5d']:+.1f}% 급등 - 안전자산 선호 강화")
+
+    # 선물/지수 경고
+    sp_fut = risk_data.get("S&P선물", {})
+    if sp_fut and sp_fut.get("chg", 0) < -1:
+        warnings.append(f"⚠ S&P 선물 {sp_fut['chg']:+.2f}% - 미장 하락 출발 가능")
+    nq_fut = risk_data.get("나스닥선물", {})
+    if nq_fut and nq_fut.get("chg", 0) < -1.5:
+        warnings.append(f"⚠ 나스닥 선물 {nq_fut['chg']:+.2f}% - 기술주 약세 신호")
+
+    kospi = risk_data.get("코스피", {})
+    if kospi and kospi.get("chg", 0) < -2:
+        warnings.append(f"⚠ 코스피 {kospi['chg']:+.2f}% 급락")
+    kosdaq = risk_data.get("코스닥", {})
+    if kosdaq and kosdaq.get("chg", 0) < -2.5:
+        warnings.append(f"⚠ 코스닥 {kosdaq['chg']:+.2f}% 급락")
+
+    if warnings:
+        w("  [리스크 경고]")
+        for warn in warnings:
+            w(f"  {warn}")
+    else:
+        w("  [리스크 양호] 주요 지표 안정권")
+    w()
+
+    # 종합 신호등
+    danger_count = sum(1 for warn in warnings if warn.startswith("⚠"))
+    if danger_count >= 3:
+        w("  종합 판단: 🔴 위험 - 보수적 매매 권장, 현금 비중 확대")
+    elif danger_count >= 1:
+        w("  종합 판단: 🟡 주의 - 선별적 매매, 리스크 관리 강화")
+    else:
+        w("  종합 판단: 🟢 양호 - 정상 매매 가능")
+    w()
+
+    return buf.getvalue()
+
+
 def scan(symbols, mkt, min_cap):
     """yfinance로 종목 스캔."""
     print(f"  [{mkt}] {len(symbols)}개 종목 다운로드 중...", file=sys.stderr)
@@ -319,7 +492,7 @@ def grade_stock(row):
     return "B"
 
 
-def generate_report(all_data, pct_h_min=90, tv_top_pct=30):
+def generate_report(all_data, pct_h_min=90, tv_top_pct=30, market="ALL"):
     """
     AND 조건 보고서 생성:
     - 52주 고가 대비 pct_h_min% 이상 (기본 90%)
@@ -337,6 +510,12 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30):
     w(f"  필터: 52주 신고가 {pct_h_min}%↑ AND 거래대금 상위 {tv_top_pct}%")
     w("=" * 70)
     w()
+
+    # 리스크 대시보드
+    risk = scan_risk_indicators(market)
+    risk_section = format_risk_section(risk, market)
+    if risk_section:
+        buf.write(risk_section)
 
     if all_data.empty:
         w("  데이터 없음.")
@@ -489,7 +668,7 @@ def scan_sector(symbols, mkt, sector_map):
     return pd.DataFrame(rows)
 
 
-def generate_sector_report(all_data, mkt_label):
+def generate_sector_report(all_data, mkt_label, market="ALL"):
     """섹터별 성과 보고서 생성."""
     buf = StringIO()
     now = datetime.now()
@@ -502,6 +681,12 @@ def generate_sector_report(all_data, mkt_label):
     w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준 (장마감 후)")
     w("=" * 70)
     w()
+
+    # 리스크 대시보드
+    risk = scan_risk_indicators(market)
+    risk_section = format_risk_section(risk, market)
+    if risk_section:
+        buf.write(risk_section)
 
     if all_data.empty:
         w("  데이터 없음.")
@@ -631,13 +816,13 @@ def run_sector(market="ALL", output=None):
         us_syms = [s for syms in US_SECTORS.values() for s in syms]
         us_data = scan_sector(us_syms, "US", US_SECTORS)
         if not us_data.empty:
-            reports.append(generate_sector_report(us_data, "미국"))
+            reports.append(generate_sector_report(us_data, "미국", market="US"))
 
     if market in ("KR", "ALL"):
         kr_syms = [s for syms in KR_SECTORS.values() for s in syms]
         kr_data = scan_sector(kr_syms, "KR", KR_SECTORS)
         if not kr_data.empty:
-            reports.append(generate_sector_report(kr_data, "한국"))
+            reports.append(generate_sector_report(kr_data, "한국", market="KR"))
 
     full_report = "\n".join(reports) if reports else "섹터 데이터 없음.\n"
     print(full_report)
@@ -820,7 +1005,7 @@ def run_report(market="ALL", output=None):
             all_dfs.append(df)
 
     combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
-    report = generate_report(combined)
+    report = generate_report(combined, market=market)
 
     # 출력
     print(report)
