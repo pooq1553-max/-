@@ -13,8 +13,15 @@ pip install yfinance pandas schedule
 import argparse
 import warnings
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from matplotlib.patches import FancyBboxPatch
+import numpy as np
 
 import pandas as pd
 import yfinance as yf
@@ -392,6 +399,162 @@ def format_risk_section(risk_data, market="ALL"):
     w()
 
     return buf.getvalue()
+
+
+def compute_fear_greed(vix_series):
+    """VIX 기반 공포/탐욕 오실레이터 (0=극단적 공포, 100=극단적 탐욕).
+
+    VIX 히스토리컬 범위를 기반으로 역전 정규화:
+    - VIX 10 이하 → 탐욕 100
+    - VIX 40 이상 → 공포 0
+    """
+    # VIX를 0~100 공포/탐욕 스케일로 변환 (역전)
+    vix_min, vix_max = 10, 40
+    fg = 100 - (vix_series.clip(vix_min, vix_max) - vix_min) / (vix_max - vix_min) * 100
+    return fg
+
+
+def generate_risk_chart(market="US", period="6mo", output_path=None):
+    """지수 + 공포/탐욕 오실레이터 겹침 차트 생성."""
+    if market == "KR":
+        index_sym, index_name = "^KS11", "코스피"
+    else:
+        index_sym, index_name = "^GSPC", "S&P 500"
+
+    # 데이터 다운로드
+    idx_data = yf.download(index_sym, period=period, interval="1d", progress=False)
+    vix_data = yf.download("^VIX", period=period, interval="1d", progress=False)
+
+    if idx_data.empty or vix_data.empty:
+        return None
+
+    # 인덱스 정리 (MultiIndex 처리)
+    if isinstance(idx_data.columns, pd.MultiIndex):
+        idx_close = idx_data[("Close", idx_data.columns.get_level_values(1)[0])].dropna()
+    else:
+        idx_close = idx_data["Close"].dropna()
+
+    if isinstance(vix_data.columns, pd.MultiIndex):
+        vix_close = vix_data[("Close", vix_data.columns.get_level_values(1)[0])].dropna()
+    else:
+        vix_close = vix_data["Close"].dropna()
+
+    # 공통 날짜로 정렬
+    common_dates = idx_close.index.intersection(vix_close.index)
+    idx_close = idx_close.loc[common_dates]
+    vix_close = vix_close.loc[common_dates]
+
+    # 공포/탐욕 계산
+    fg = compute_fear_greed(vix_close)
+
+    # ─── 차트 그리기 ───
+    plt.rcParams["font.size"] = 11
+    fig, ax1 = plt.subplots(figsize=(14, 7))
+
+    # 배경 어둡게
+    fig.patch.set_facecolor("#1a1a2e")
+    ax1.set_facecolor("#16213e")
+
+    # 지수 라인 (왼쪽 Y축)
+    color_idx = "#00d4ff"
+    ax1.plot(idx_close.index, idx_close.values, color=color_idx, linewidth=2,
+             label=index_name, zorder=3)
+    ax1.fill_between(idx_close.index, idx_close.values, idx_close.min() * 0.98,
+                     alpha=0.1, color=color_idx)
+    ax1.set_ylabel(index_name, color=color_idx, fontsize=13, fontweight="bold")
+    ax1.tick_params(axis="y", labelcolor=color_idx)
+
+    # 오른쪽 Y축: 공포/탐욕 오실레이터
+    ax2 = ax1.twinx()
+
+    # 공포/탐욕 영역 색상
+    fg_values = fg.values.flatten() if hasattr(fg.values, 'flatten') else fg.values
+    dates = fg.index
+
+    # 배경 구간 표시
+    ax2.axhspan(0, 25, alpha=0.15, color="#ff4444", zorder=0)    # 극단적 공포
+    ax2.axhspan(25, 45, alpha=0.10, color="#ff8800", zorder=0)   # 공포
+    ax2.axhspan(45, 55, alpha=0.08, color="#ffff00", zorder=0)   # 중립
+    ax2.axhspan(55, 75, alpha=0.10, color="#88cc00", zorder=0)   # 탐욕
+    ax2.axhspan(75, 100, alpha=0.15, color="#00cc44", zorder=0)  # 극단적 탐욕
+
+    # 오실레이터 라인
+    ax2.plot(dates, fg_values, color="#ffd700", linewidth=1.8, alpha=0.9,
+             label="공포/탐욕", zorder=2)
+    ax2.set_ylabel("공포 ← → 탐욕", color="#ffd700", fontsize=13, fontweight="bold")
+    ax2.set_ylim(0, 100)
+    ax2.tick_params(axis="y", labelcolor="#ffd700")
+
+    # 우측 레이블
+    label_props = dict(fontsize=8, fontweight="bold", va="center",
+                       ha="right", transform=ax2.get_yaxis_transform())
+    ax2.text(1.12, 12.5, "극단적\n공포", color="#ff4444", **label_props)
+    ax2.text(1.12, 35, "공포", color="#ff8800", **label_props)
+    ax2.text(1.12, 50, "중립", color="#cccc00", **label_props)
+    ax2.text(1.12, 65, "탐욕", color="#88cc00", **label_props)
+    ax2.text(1.12, 87.5, "극단적\n탐욕", color="#00cc44", **label_props)
+
+    # 현재값 표시
+    last_fg = fg_values[-1]
+    last_idx = idx_close.values[-1]
+    last_date = dates[-1]
+
+    if last_fg >= 75:
+        fg_label, fg_color = "극단적 탐욕", "#00cc44"
+    elif last_fg >= 55:
+        fg_label, fg_color = "탐욕", "#88cc00"
+    elif last_fg >= 45:
+        fg_label, fg_color = "중립", "#cccc00"
+    elif last_fg >= 25:
+        fg_label, fg_color = "공포", "#ff8800"
+    else:
+        fg_label, fg_color = "극단적 공포", "#ff4444"
+
+    # 현재값 마커
+    ax2.scatter([last_date], [last_fg], color=fg_color, s=120, zorder=5,
+                edgecolors="white", linewidth=2)
+    ax2.annotate(f"{fg_label} ({last_fg:.0f})",
+                 xy=(last_date, last_fg), xytext=(15, 15),
+                 textcoords="offset points", color=fg_color, fontsize=11,
+                 fontweight="bold",
+                 arrowprops=dict(arrowstyle="->", color=fg_color, lw=1.5))
+
+    ax1.scatter([last_date], [last_idx], color=color_idx, s=100, zorder=5,
+                edgecolors="white", linewidth=2)
+
+    # X축 포맷
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+    ax1.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
+    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, color="#aaaaaa")
+    ax1.tick_params(axis="x", colors="#aaaaaa")
+
+    # 그리드
+    ax1.grid(True, alpha=0.2, color="#ffffff", linestyle="--")
+
+    # 타이틀
+    now = datetime.now()
+    fig.suptitle(f"{index_name} + Fear & Greed Oscillator",
+                 fontsize=16, fontweight="bold", color="white", y=0.97)
+    ax1.set_title(f"{now.strftime('%Y-%m-%d %H:%M')} 기준  |  VIX: {vix_close.iloc[-1]:.1f}",
+                  fontsize=11, color="#aaaaaa", pad=10)
+
+    # 범례
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
+               facecolor="#1a1a2e", edgecolor="#333333", labelcolor="white",
+               fontsize=10)
+
+    fig.subplots_adjust(right=0.85, bottom=0.12, top=0.90)
+
+    # 저장
+    if not output_path:
+        output_path = f"risk_chart_{market}_{now.strftime('%Y%m%d_%H%M')}.png"
+    fig.savefig(output_path, dpi=150, facecolor=fig.get_facecolor(),
+                edgecolor="none", bbox_inches="tight")
+    plt.close(fig)
+    print(f"  차트 저장: {output_path}", file=sys.stderr)
+    return output_path
 
 
 def scan(symbols, mkt, min_cap):
@@ -808,7 +971,7 @@ def generate_sector_report(all_data, mkt_label, market="ALL"):
     return buf.getvalue()
 
 
-def run_sector(market="ALL", output=None):
+def run_sector(market="ALL", output=None, chart=True):
     """섹터 보고서 실행."""
     reports = []
 
@@ -836,7 +999,23 @@ def run_sector(market="ALL", output=None):
         f.write(full_report)
     print(f"  보고서 저장: {filepath}", file=sys.stderr)
 
-    return filepath
+    # 차트 생성
+    chart_paths = []
+    if chart:
+        import os
+        chart_markets = []
+        if market in ("US", "ALL"):
+            chart_markets.append("US")
+        if market in ("KR", "ALL"):
+            chart_markets.append("KR")
+        for m in chart_markets:
+            chart_dir = os.path.dirname(filepath) or "."
+            chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
+            result = generate_risk_chart(market=m, output_path=chart_path)
+            if result:
+                chart_paths.append(result)
+
+    return filepath, chart_paths
 
 
 def scan_premarket(symbols):
@@ -989,7 +1168,7 @@ def run_premarket(output=None):
     return filepath
 
 
-def run_report(market="ALL", output=None):
+def run_report(market="ALL", output=None, chart=True):
     """보고서 실행."""
     jobs = []
     if market in ("US", "ALL"):
@@ -1020,7 +1199,23 @@ def run_report(market="ALL", output=None):
         f.write(report)
     print(f"  보고서 저장: {filepath}", file=sys.stderr)
 
-    return filepath
+    # 차트 생성
+    chart_paths = []
+    if chart:
+        chart_markets = []
+        if market in ("US", "ALL"):
+            chart_markets.append("US")
+        if market in ("KR", "ALL"):
+            chart_markets.append("KR")
+        for m in chart_markets:
+            import os
+            chart_dir = os.path.dirname(filepath) or "."
+            chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
+            result = generate_risk_chart(market=m, output_path=chart_path)
+            if result:
+                chart_paths.append(result)
+
+    return filepath, chart_paths
 
 
 def main():
@@ -1033,13 +1228,15 @@ def main():
                         help="미국 프리마켓 52주 신고가 스캔")
     parser.add_argument("--sector", action="store_true",
                         help="섹터별 성과 보고서 생성")
+    parser.add_argument("--no-chart", action="store_true",
+                        help="차트 생성 비활성화")
     args = parser.parse_args()
     if args.premarket:
         run_premarket(output=args.output)
     elif args.sector:
-        run_sector(market=args.market, output=args.output)
+        run_sector(market=args.market, output=args.output, chart=not args.no_chart)
     else:
-        run_report(market=args.market, output=args.output)
+        run_report(market=args.market, output=args.output, chart=not args.no_chart)
 
 
 if __name__ == "__main__":

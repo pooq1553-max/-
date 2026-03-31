@@ -33,7 +33,6 @@ jobs:
         run: |
           echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
           HOUR=$(date -u +%H)
-          # 수동 실행 시 입력값 사용, 스케줄 시 시간으로 판별
           if [ -n "${{ inputs.market }}" ]; then
             echo "MARKET=${{ inputs.market }}" >> $GITHUB_ENV
           elif [ "$HOUR" -lt 12 ]; then
@@ -48,13 +47,21 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance pandas
+        run: pip install yfinance pandas matplotlib numpy
 
       - name: Generate sector report
         run: |
           mkdir -p reports
           python3 stock_report.py --sector --market ${{ env.MARKET }} \
             --output reports/sector_${{ env.MARKET }}_${{ env.TODAY }}.txt
+
+      - name: Collect attachments
+        run: |
+          FILES="reports/sector_${{ env.MARKET }}_${{ env.TODAY }}.txt"
+          for f in reports/risk_chart_*.png; do
+            [ -f "$f" ] && FILES="$FILES,$f"
+          done
+          echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
       - name: Commit and push report
         run: |
@@ -86,5 +93,5 @@ jobs:
           from: 투자보고서봇
           body: |
             ${{ env.MARKET }} 시장 장마감 후 섹터별 성과 분석 보고서입니다.
-            어떤 섹터가 강했는지, 자금 흐름을 확인하세요.
-          attachments: reports/sector_${{ env.MARKET }}_${{ env.TODAY }}.txt
+            차트: 지수 + Fear & Greed 오실레이터
+          attachments: ${{ env.ATTACHMENTS }}
