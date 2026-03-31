@@ -402,24 +402,18 @@ def format_risk_section(risk_data, market="ALL"):
 
 
 def compute_fear_greed(vix_series):
-    """VIX 기반 공포/탐욕 오실레이터 (0=극단적 공포, 100=극단적 탐욕).
-
-    VIX 히스토리컬 범위를 기반으로 역전 정규화:
-    - VIX 10 이하 → 탐욕 100
-    - VIX 40 이상 → 공포 0
-    """
-    # VIX를 0~100 공포/탐욕 스케일로 변환 (역전)
+    """VIX 기반 Daily Sentiment Index (0=극단적 공포, 100=극단적 탐욕)."""
     vix_min, vix_max = 10, 40
     fg = 100 - (vix_series.clip(vix_min, vix_max) - vix_min) / (vix_max - vix_min) * 100
     return fg
 
 
-def generate_risk_chart(market="US", period="6mo", output_path=None):
-    """지수 + 공포/탐욕 오실레이터 겹침 차트 생성."""
+def generate_risk_chart(market="US", period="3y", output_path=None):
+    """지수 + Daily Sentiment 2단 패널 차트 (Jake Bernstein 스타일)."""
     if market == "KR":
-        index_sym, index_name = "^KS11", "코스피"
+        index_sym, index_name = "^KS11", "KOSPI"
     else:
-        index_sym, index_name = "^GSPC", "S&P 500"
+        index_sym, index_name = "^IXIC", "NASDAQ"
 
     # 데이터 다운로드
     idx_data = yf.download(index_sym, period=period, interval="1d", progress=False)
@@ -428,7 +422,7 @@ def generate_risk_chart(market="US", period="6mo", output_path=None):
     if idx_data.empty or vix_data.empty:
         return None
 
-    # 인덱스 정리 (MultiIndex 처리)
+    # MultiIndex 처리
     if isinstance(idx_data.columns, pd.MultiIndex):
         idx_close = idx_data[("Close", idx_data.columns.get_level_values(1)[0])].dropna()
     else:
@@ -439,113 +433,124 @@ def generate_risk_chart(market="US", period="6mo", output_path=None):
     else:
         vix_close = vix_data["Close"].dropna()
 
-    # 공통 날짜로 정렬
+    # 공통 날짜 정렬
     common_dates = idx_close.index.intersection(vix_close.index)
     idx_close = idx_close.loc[common_dates]
     vix_close = vix_close.loc[common_dates]
 
-    # 공포/탐욕 계산
-    fg = compute_fear_greed(vix_close)
+    # 센티먼트 계산
+    sentiment = compute_fear_greed(vix_close)
+    sent_values = sentiment.values.flatten() if hasattr(sentiment.values, 'flatten') else sentiment.values
+    idx_values = idx_close.values.flatten() if hasattr(idx_close.values, 'flatten') else idx_close.values
+    dates = idx_close.index
 
-    # ─── 차트 그리기 ───
-    plt.rcParams["font.size"] = 11
-    fig, ax1 = plt.subplots(figsize=(14, 7))
+    # 바닥 시그널 감지 (센티먼트 < 20 구간의 로컬 최저점)
+    BOTTOM_THRESHOLD = 20
+    bottom_dates = []
+    bottom_sent = []
+    bottom_idx = []
+    in_bottom = False
+    local_min_val = 999
+    local_min_i = 0
 
-    # 배경 어둡게
-    fig.patch.set_facecolor("#1a1a2e")
-    ax1.set_facecolor("#16213e")
+    for i in range(len(sent_values)):
+        if sent_values[i] < BOTTOM_THRESHOLD:
+            if not in_bottom:
+                in_bottom = True
+                local_min_val = sent_values[i]
+                local_min_i = i
+            elif sent_values[i] < local_min_val:
+                local_min_val = sent_values[i]
+                local_min_i = i
+        else:
+            if in_bottom:
+                bottom_dates.append(dates[local_min_i])
+                bottom_sent.append(sent_values[local_min_i])
+                bottom_idx.append(idx_values[local_min_i])
+                in_bottom = False
+                local_min_val = 999
+    # 현재도 바닥 구간이면 추가
+    if in_bottom:
+        bottom_dates.append(dates[local_min_i])
+        bottom_sent.append(sent_values[local_min_i])
+        bottom_idx.append(idx_values[local_min_i])
 
-    # 지수 라인 (왼쪽 Y축)
-    color_idx = "#00d4ff"
-    ax1.plot(idx_close.index, idx_close.values, color=color_idx, linewidth=2,
-             label=index_name, zorder=3)
-    ax1.fill_between(idx_close.index, idx_close.values, idx_close.min() * 0.98,
-                     alpha=0.1, color=color_idx)
-    ax1.set_ylabel(index_name, color=color_idx, fontsize=13, fontweight="bold")
-    ax1.tick_params(axis="y", labelcolor=color_idx)
+    # ─── 2단 패널 차트 ───
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(14, 9),
+                                          gridspec_kw={"height_ratios": [1.2, 1],
+                                                       "hspace": 0.08})
+    fig.patch.set_facecolor("#0d1117")
 
-    # 오른쪽 Y축: 공포/탐욕 오실레이터
-    ax2 = ax1.twinx()
+    now = datetime.now()
+    last_sent = sent_values[-1]
 
-    # 공포/탐욕 영역 색상
-    fg_values = fg.values.flatten() if hasattr(fg.values, 'flatten') else fg.values
-    dates = fg.index
+    # ── 상단: 지수 ──
+    ax_top.set_facecolor("#0d1117")
+    ax_top.plot(dates, idx_values, color="#4a9eff", linewidth=1.5, zorder=2)
+    ax_top.text(0.02, 0.92, index_name, transform=ax_top.transAxes,
+                fontsize=22, fontweight="bold", color="#4a9eff", va="top")
 
-    # 배경 구간 표시
-    ax2.axhspan(0, 25, alpha=0.15, color="#ff4444", zorder=0)    # 극단적 공포
-    ax2.axhspan(25, 45, alpha=0.10, color="#ff8800", zorder=0)   # 공포
-    ax2.axhspan(45, 55, alpha=0.08, color="#ffff00", zorder=0)   # 중립
-    ax2.axhspan(55, 75, alpha=0.10, color="#88cc00", zorder=0)   # 탐욕
-    ax2.axhspan(75, 100, alpha=0.15, color="#00cc44", zorder=0)  # 극단적 탐욕
-
-    # 오실레이터 라인
-    ax2.plot(dates, fg_values, color="#ffd700", linewidth=1.8, alpha=0.9,
-             label="공포/탐욕", zorder=2)
-    ax2.set_ylabel("공포 ← → 탐욕", color="#ffd700", fontsize=13, fontweight="bold")
-    ax2.set_ylim(0, 100)
-    ax2.tick_params(axis="y", labelcolor="#ffd700")
-
-    # 우측 레이블
-    label_props = dict(fontsize=8, fontweight="bold", va="center",
-                       ha="right", transform=ax2.get_yaxis_transform())
-    ax2.text(1.12, 12.5, "극단적\n공포", color="#ff4444", **label_props)
-    ax2.text(1.12, 35, "공포", color="#ff8800", **label_props)
-    ax2.text(1.12, 50, "중립", color="#cccc00", **label_props)
-    ax2.text(1.12, 65, "탐욕", color="#88cc00", **label_props)
-    ax2.text(1.12, 87.5, "극단적\n탐욕", color="#00cc44", **label_props)
-
-    # 현재값 표시
-    last_fg = fg_values[-1]
-    last_idx = idx_close.values[-1]
-    last_date = dates[-1]
-
-    if last_fg >= 75:
-        fg_label, fg_color = "극단적 탐욕", "#00cc44"
-    elif last_fg >= 55:
-        fg_label, fg_color = "탐욕", "#88cc00"
-    elif last_fg >= 45:
-        fg_label, fg_color = "중립", "#cccc00"
-    elif last_fg >= 25:
-        fg_label, fg_color = "공포", "#ff8800"
-    else:
-        fg_label, fg_color = "극단적 공포", "#ff4444"
+    # 바닥 시그널 마킹 (지수 위)
+    if bottom_dates:
+        ax_top.scatter(bottom_dates, bottom_idx, s=200, facecolors="none",
+                       edgecolors="#ff8c00", linewidth=2.5, zorder=3)
 
     # 현재값 마커
-    ax2.scatter([last_date], [last_fg], color=fg_color, s=120, zorder=5,
-                edgecolors="white", linewidth=2)
-    ax2.annotate(f"{fg_label} ({last_fg:.0f})",
-                 xy=(last_date, last_fg), xytext=(15, 15),
-                 textcoords="offset points", color=fg_color, fontsize=11,
-                 fontweight="bold",
-                 arrowprops=dict(arrowstyle="->", color=fg_color, lw=1.5))
+    ax_top.scatter([dates[-1]], [idx_values[-1]], color="#ff8c00", s=180,
+                   facecolors="none", edgecolors="#ff8c00", linewidth=2.5, zorder=3)
 
-    ax1.scatter([last_date], [last_idx], color=color_idx, s=100, zorder=5,
-                edgecolors="white", linewidth=2)
+    ax_top.set_xlim(dates[0], dates[-1])
+    ax_top.tick_params(axis="y", labelcolor="#888888", labelsize=10)
+    ax_top.tick_params(axis="x", labelbottom=False)
+    ax_top.spines["top"].set_visible(False)
+    ax_top.spines["right"].set_visible(False)
+    ax_top.spines["bottom"].set_color("#333333")
+    ax_top.spines["left"].set_color("#333333")
+    ax_top.grid(True, alpha=0.15, color="#ffffff", linestyle="-")
 
-    # X축 포맷
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
-    ax1.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
-    plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45, color="#aaaaaa")
-    ax1.tick_params(axis="x", colors="#aaaaaa")
+    # ── 하단: Daily Sentiment Index ──
+    ax_bot.set_facecolor("#0d1117")
+    ax_bot.fill_between(dates, sent_values, 0, color="#2aa198", alpha=0.4)
+    ax_bot.plot(dates, sent_values, color="#2aa198", linewidth=1.2, zorder=2)
 
-    # 그리드
-    ax1.grid(True, alpha=0.2, color="#ffffff", linestyle="--")
+    ax_bot.text(0.02, 0.92, "Daily Sentiment Index", transform=ax_bot.transAxes,
+                fontsize=16, fontweight="bold", color="#2aa198", va="top")
+
+    # 20 라인 (바닥 기준선)
+    ax_bot.axhline(y=BOTTOM_THRESHOLD, color="#ff4444", linewidth=1.5,
+                   linestyle="-", alpha=0.8, zorder=1)
+    ax_bot.text(dates[0], BOTTOM_THRESHOLD + 2, f" All prior <{BOTTOM_THRESHOLD} = bottoms",
+                color="#ff4444", fontsize=9, fontweight="bold", va="bottom")
+
+    # 바닥 시그널 마킹 (센티먼트 위)
+    if bottom_dates:
+        ax_bot.scatter(bottom_dates, bottom_sent, s=200, facecolors="none",
+                       edgecolors="#ff8c00", linewidth=2.5, zorder=3)
+
+    # 현재값 마커 + 숫자
+    ax_bot.scatter([dates[-1]], [last_sent], color="#ff8c00", s=180,
+                   facecolors="none", edgecolors="#ff8c00", linewidth=2.5, zorder=3)
+    ax_bot.annotate(f"{last_sent:.0f}", xy=(dates[-1], last_sent),
+                    xytext=(12, 0), textcoords="offset points",
+                    color="#ff8c00", fontsize=14, fontweight="bold", va="center")
+
+    ax_bot.set_ylim(0, 100)
+    ax_bot.set_xlim(dates[0], dates[-1])
+    ax_bot.tick_params(axis="y", labelcolor="#888888", labelsize=10)
+    ax_bot.tick_params(axis="x", labelcolor="#888888", labelsize=10, rotation=0)
+    ax_bot.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
+    ax_bot.xaxis.set_major_locator(mdates.MonthLocator(interval=4))
+    ax_bot.spines["top"].set_color("#333333")
+    ax_bot.spines["right"].set_visible(False)
+    ax_bot.spines["bottom"].set_color("#333333")
+    ax_bot.spines["left"].set_color("#333333")
+    ax_bot.grid(True, alpha=0.15, color="#ffffff", linestyle="-")
 
     # 타이틀
-    now = datetime.now()
-    fig.suptitle(f"{index_name} + Fear & Greed Oscillator",
-                 fontsize=16, fontweight="bold", color="white", y=0.97)
-    ax1.set_title(f"{now.strftime('%Y-%m-%d %H:%M')} 기준  |  VIX: {vix_close.iloc[-1]:.1f}",
-                  fontsize=11, color="#aaaaaa", pad=10)
+    fig.suptitle(f"{index_name} Sentiment {last_sent:.0f}  {now.strftime('%m/%d')}",
+                 fontsize=14, fontweight="bold", color="#cccccc", y=0.98)
 
-    # 범례
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
-               facecolor="#1a1a2e", edgecolor="#333333", labelcolor="white",
-               fontsize=10)
-
-    fig.subplots_adjust(right=0.85, bottom=0.12, top=0.90)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.94, bottom=0.08)
 
     # 저장
     if not output_path:
