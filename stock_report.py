@@ -880,6 +880,7 @@ def generate_sector_report(all_data, mkt_label, market="ALL"):
             total_tv=total_tv, n=n, total_mc=total_mc,
             top_sym=top_stock["sym"], top_chg=top_stock["chg"],
             worst_sym=worst_stock["sym"], worst_chg=worst_stock["chg"],
+            up_pct=len(sdf[sdf["chg"] > 0]) / n * 100 if n else 0,
         ))
 
     sdf = pd.DataFrame(sector_stats).sort_values("weighted_avg", ascending=False)
@@ -896,6 +897,72 @@ def generate_sector_report(all_data, mkt_label, market="ALL"):
           f"  {fmt_tv(r['total_tv'], mkt):>12}  {r['n']:>4}개")
 
     w()
+
+    # ─── 섹터 액션 감지 ───
+    ACTION_THRESHOLD = 1.5  # 섹터 평균 등락률 ±1.5% 이상이면 액션
+    CONSENSUS_THRESHOLD = 80  # 섹터 내 80% 이상 같은 방향이면 강한 합의
+
+    hot_sectors = sdf[sdf["weighted_avg"] >= ACTION_THRESHOLD]
+    cold_sectors = sdf[sdf["weighted_avg"] <= -ACTION_THRESHOLD]
+    consensus_up = sdf[sdf["up_pct"] >= CONSENSUS_THRESHOLD]
+    consensus_dn = sdf[sdf["up_pct"] <= (100 - CONSENSUS_THRESHOLD)]
+
+    has_action = not hot_sectors.empty or not cold_sectors.empty
+
+    if has_action:
+        w("=" * 70)
+        w("  섹터 액션 감지")
+        w("=" * 70)
+        w()
+
+        if not hot_sectors.empty:
+            w("  [급등 섹터]")
+            for _, r in hot_sectors.iterrows():
+                top_name = get_name(r["top_sym"])
+                consensus = ""
+                if r["up_pct"] >= CONSENSUS_THRESHOLD:
+                    consensus = f"  (종목 {r['up_pct']:.0f}% 동반 상승!)"
+                w(f"    ▲ {r['sector']} +{r['weighted_avg']:.2f}%{consensus}")
+                w(f"      주도주: {top_name} ({r['top_chg']:+.2f}%)")
+                # 해당 섹터 종목들
+                sec_stocks = all_data[all_data["sector"] == r["sector"]].sort_values("chg", ascending=False)
+                syms_str = ", ".join(
+                    f"{get_name(st['sym'])}({st['chg']:+.1f}%)"
+                    for _, st in sec_stocks.head(5).iterrows()
+                )
+                w(f"      {syms_str}")
+            w()
+
+        if not cold_sectors.empty:
+            w("  [급락 섹터]")
+            for _, r in cold_sectors.iterrows():
+                worst_name = get_name(r["worst_sym"])
+                consensus = ""
+                if r["up_pct"] <= (100 - CONSENSUS_THRESHOLD):
+                    consensus = f"  (종목 {100 - r['up_pct']:.0f}% 동반 하락!)"
+                w(f"    ▼ {r['sector']} {r['weighted_avg']:.2f}%{consensus}")
+                w(f"      최약: {worst_name} ({r['worst_chg']:+.2f}%)")
+                sec_stocks = all_data[all_data["sector"] == r["sector"]].sort_values("chg")
+                syms_str = ", ".join(
+                    f"{get_name(st['sym'])}({st['chg']:+.1f}%)"
+                    for _, st in sec_stocks.head(5).iterrows()
+                )
+                w(f"      {syms_str}")
+            w()
+
+        # 액션 코멘트
+        if not hot_sectors.empty and cold_sectors.empty:
+            w("  -> 섹터 쏠림 상승: 특정 테마 강세장")
+        elif hot_sectors.empty and not cold_sectors.empty:
+            w("  -> 섹터 동반 하락: 리스크오프 장세 주의")
+        elif not hot_sectors.empty and not cold_sectors.empty:
+            w("  -> 섹터 로테이션 진행 중: 순환매 장세")
+        w()
+    else:
+        w("-" * 70)
+        w("  [섹터 액션 없음] 뚜렷한 섹터 쏠림 없이 혼조세")
+        w("-" * 70)
+        w()
 
     # ─── 강세 섹터 상세 ───
     strong = sdf[sdf["weighted_avg"] > 0]
