@@ -608,10 +608,18 @@ def scan(symbols, mkt, min_cap):
                 avg_tv = tv
             tv_ratio = (tv / avg_tv) if avg_tv else 1.0
 
+            # Forward PER
+            try:
+                info = t.info
+                fwd_pe = info.get("forwardPE", None)
+            except Exception:
+                fwd_pe = None
+
             rows.append(dict(
                 sym=sym, price=price, chg=chg, h52=h52, l52=l52,
                 pct_h=pct_h, mc=mc, vol=vol, avg_vol=avg_vol,
                 vol_r=vol_r, tv=tv, avg_tv=avg_tv, tv_ratio=tv_ratio, mkt=mkt,
+                fwd_pe=fwd_pe,
             ))
             if (i + 1) % 20 == 0:
                 print(f"  ... {i+1}/{len(symbols)}", file=sys.stderr)
@@ -680,10 +688,14 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30, market="ALL"):
     w()
 
     # 리스크 대시보드
-    risk = scan_risk_indicators(market)
-    risk_section = format_risk_section(risk, market)
-    if risk_section:
-        buf.write(risk_section)
+    try:
+        risk = scan_risk_indicators(market)
+        risk_section = format_risk_section(risk, market)
+        if risk_section:
+            buf.write(risk_section)
+    except Exception as e:
+        w(f"  [리스크 지표 로딩 실패: {e}]")
+        w()
 
     if all_data.empty:
         w("  데이터 없음.")
@@ -744,7 +756,8 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30, market="ALL"):
                 w(f"      현재가: {fmt_price(r['price'], mkt)}  |  등락: {r['chg']:+.2f}%")
                 w(f"      52주 고가 대비: {r['pct_h']:.1f}%  (고가: {fmt_price(r['h52'], mkt)})")
                 w(f"      거래대금: {fmt_tv(r['tv'], mkt)}  (평균 대비 {r['tv_ratio']:.1f}배)")
-                w(f"      거래량 비율: {r['vol_r']:.1f}x  |  시가총액: {fmt_cap(r['mc'], mkt)}")
+                fwd_pe_str = f"{r['fwd_pe']:.1f}" if pd.notna(r.get('fwd_pe')) and r.get('fwd_pe') else "-"
+                w(f"      거래량 비율: {r['vol_r']:.1f}x  |  시가총액: {fmt_cap(r['mc'], mkt)}  |  Fwd P/E: {fwd_pe_str}")
 
                 # 간단한 코멘트
                 comments = []
@@ -780,8 +793,9 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30, market="ALL"):
         w("  [최우선 관심 종목]")
         for _, r in s_stocks.iterrows():
             name = get_name(r["sym"])
+            pe_note = f"  (Fwd P/E: {r['fwd_pe']:.1f})" if pd.notna(r.get('fwd_pe')) and r.get('fwd_pe') else ""
             w(f"    - {name}: 신고가 근접({r['pct_h']:.1f}%) + "
-              f"거래대금 활발({r['tv_ratio']:.1f}x) -> 추세 추종 매매 유리")
+              f"거래대금 활발({r['tv_ratio']:.1f}x){pe_note} -> 추세 추종 매매 유리")
         w()
 
     a_stocks = df[df["grade"] == "A"]
@@ -851,10 +865,14 @@ def generate_sector_report(all_data, mkt_label, market="ALL"):
     w()
 
     # 리스크 대시보드
-    risk = scan_risk_indicators(market)
-    risk_section = format_risk_section(risk, market)
-    if risk_section:
-        buf.write(risk_section)
+    try:
+        risk = scan_risk_indicators(market)
+        risk_section = format_risk_section(risk, market)
+        if risk_section:
+            buf.write(risk_section)
+    except Exception as e:
+        w(f"  [리스크 지표 로딩 실패: {e}]")
+        w()
 
     if all_data.empty:
         w("  데이터 없음.")
@@ -1081,11 +1099,14 @@ def run_sector(market="ALL", output=None, chart=True):
         if market in ("KR", "ALL"):
             chart_markets.append("KR")
         for m in chart_markets:
-            chart_dir = os.path.dirname(filepath) or "."
-            chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
-            result = generate_risk_chart(market=m, output_path=chart_path)
-            if result:
-                chart_paths.append(result)
+            try:
+                chart_dir = os.path.dirname(filepath) or "."
+                chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
+                result = generate_risk_chart(market=m, output_path=chart_path)
+                if result:
+                    chart_paths.append(result)
+            except Exception as e:
+                print(f"  차트 생성 실패 ({m}): {e}", file=sys.stderr)
 
     return filepath, chart_paths
 
@@ -1274,18 +1295,21 @@ def run_report(market="ALL", output=None, chart=True):
     # 차트 생성
     chart_paths = []
     if chart:
+        import os
         chart_markets = []
         if market in ("US", "ALL"):
             chart_markets.append("US")
         if market in ("KR", "ALL"):
             chart_markets.append("KR")
         for m in chart_markets:
-            import os
-            chart_dir = os.path.dirname(filepath) or "."
-            chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
-            result = generate_risk_chart(market=m, output_path=chart_path)
-            if result:
-                chart_paths.append(result)
+            try:
+                chart_dir = os.path.dirname(filepath) or "."
+                chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
+                result = generate_risk_chart(market=m, output_path=chart_path)
+                if result:
+                    chart_paths.append(result)
+            except Exception as e:
+                print(f"  차트 생성 실패 ({m}): {e}", file=sys.stderr)
 
     return filepath, chart_paths
 
