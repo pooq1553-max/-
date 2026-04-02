@@ -40,6 +40,8 @@ jobs:
           else
             echo "MARKET=US" >> $GITHUB_ENV
           fi
+          # 이메일 제목 미리 설정 (나중에 MARKET 기반으로 덮어씀)
+          echo "SUBJECT=[섹터] 장마감 성과 분석 - $(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,6 +50,16 @@ jobs:
 
       - name: Install dependencies
         run: pip install yfinance pandas matplotlib numpy
+
+      - name: Set email subject
+        run: |
+          if [ "${{ env.MARKET }}" = "KR" ]; then
+            echo "SUBJECT=[국장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          elif [ "${{ env.MARKET }}" = "US" ]; then
+            echo "SUBJECT=[미장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          else
+            echo "SUBJECT=[섹터 분석] 장마감 성과 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          fi
 
       - name: Generate sector report
         run: |
@@ -70,18 +82,7 @@ jobs:
           git add reports/
           git diff --staged --quiet || (git commit -m "sector: $(date +%Y-%m-%d) ${{ env.MARKET }} 섹터 보고서" && git push)
 
-      - name: Set email subject
-        run: |
-          if [ "${{ env.MARKET }}" = "KR" ]; then
-            echo "SUBJECT=[국장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          elif [ "${{ env.MARKET }}" = "US" ]; then
-            echo "SUBJECT=[미장 섹터] 장마감 성과 분석 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          else
-            echo "SUBJECT=[섹터 분석] 장마감 성과 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          fi
-
       - name: Send email notification
-        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com

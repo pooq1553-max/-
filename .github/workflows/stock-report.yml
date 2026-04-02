@@ -40,6 +40,7 @@ jobs:
           else
             echo "MARKET=US" >> $GITHUB_ENV
           fi
+          echo "SUBJECT=[투자] 52주 신고가 보고서 - $(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,6 +49,16 @@ jobs:
 
       - name: Install dependencies
         run: pip install yfinance pandas matplotlib numpy
+
+      - name: Set email subject
+        run: |
+          if [ "${{ env.MARKET }}" = "KR" ]; then
+            echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          elif [ "${{ env.MARKET }}" = "US" ]; then
+            echo "SUBJECT=[미장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          else
+            echo "SUBJECT=[투자] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+          fi
 
       - name: Generate report
         run: |
@@ -70,18 +81,7 @@ jobs:
           git add reports/
           git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) ${{ env.MARKET }} 투자 보고서" && git push)
 
-      - name: Set email subject
-        run: |
-          if [ "${{ env.MARKET }}" = "KR" ]; then
-            echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          elif [ "${{ env.MARKET }}" = "US" ]; then
-            echo "SUBJECT=[미장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          else
-            echo "SUBJECT=[투자] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
-          fi
-
       - name: Send email notification
-        if: always()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
