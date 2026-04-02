@@ -2,9 +2,7 @@ name: Daily Stock Report
 
 on:
   schedule:
-    # 국장: UTC 06:30 트리거 → 딜레이 감안 KST 16시쯤 도착
     - cron: '30 6 * * 1-5'
-    # 미장: UTC 20:00 트리거 → 딜레이 감안 ET 16:30쯤 도착
     - cron: '0 20 * * 1-5'
   workflow_dispatch:
     inputs:
@@ -74,13 +72,6 @@ jobs:
           done
           echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
-      - name: Commit and push report
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add reports/
-          git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) ${{ env.MARKET }} 투자 보고서" && git push)
-
       - name: Send email notification
         uses: dawidd6/action-send-mail@v3
         with:
@@ -94,3 +85,11 @@ jobs:
           body: |
             ${{ env.MARKET }} 시장 장마감 후 52주 신고가 보고서입니다.
           attachments: ${{ env.ATTACHMENTS }}
+
+      - name: Commit and push report
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git diff --staged --quiet || (git commit -m "report: $(date +%Y-%m-%d) ${{ env.MARKET }} 투자 보고서" && git pull --rebase && git push)
