@@ -16,9 +16,6 @@ on:
           - KR
           - ALL
 
-permissions:
-  contents: write
-
 jobs:
   generate-report:
     runs-on: ubuntu-latest
@@ -38,7 +35,6 @@ jobs:
           else
             echo "MARKET=US" >> $GITHUB_ENV
           fi
-          echo "SUBJECT=[투자] 52주 신고가 보고서 - $(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -61,18 +57,10 @@ jobs:
       - name: Generate report
         run: |
           mkdir -p reports
-          python3 stock_report.py --market ${{ env.MARKET }} \
+          python3 stock_report.py --market ${{ env.MARKET }} --no-chart \
             --output reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
 
-      - name: Collect attachments
-        run: |
-          FILES="reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt"
-          for f in reports/risk_chart_*.png; do
-            [ -f "$f" ] && FILES="$FILES,$f"
-          done
-          echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
-
-      - name: Send email notification
+      - name: Send email
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -84,5 +72,4 @@ jobs:
           from: 투자보고서봇
           body: |
             ${{ env.MARKET }} 시장 장마감 후 52주 신고가 보고서입니다.
-          attachments: ${{ env.ATTACHMENTS }}
-
+          attachments: reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
