@@ -49,16 +49,30 @@ jobs:
           if [ "${{ env.MARKET }}" = "KR" ]; then
             echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
           elif [ "${{ env.MARKET }}" = "US" ]; then
-            echo "SUBJECT=[미장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+            echo "SUBJECT=[미장] 52주 신고가 + 미너비니 피봇 - ${{ env.TODAY }}" >> $GITHUB_ENV
           else
             echo "SUBJECT=[투자] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
           fi
 
-      - name: Generate report
+      - name: Generate 52-week high report
         run: |
           mkdir -p reports
           python3 stock_report.py --market ${{ env.MARKET }} --no-chart \
             --output reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
+
+      - name: Generate Minervini scan (US only)
+        if: env.MARKET == 'US' || env.MARKET == 'ALL'
+        run: |
+          python3 stock_report.py --minervini \
+            --output reports/minervini_${{ env.TODAY }}.txt
+
+      - name: Collect attachments
+        run: |
+          FILES="reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt"
+          if [ -f "reports/minervini_${{ env.TODAY }}.txt" ]; then
+            FILES="$FILES,reports/minervini_${{ env.TODAY }}.txt"
+          fi
+          echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
       - name: Send email
         uses: dawidd6/action-send-mail@v3
@@ -71,5 +85,5 @@ jobs:
           to: pooq1553@gmail.com
           from: 투자보고서봇
           body: |
-            ${{ env.MARKET }} 시장 장마감 후 52주 신고가 보고서입니다.
-          attachments: reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
+            ${{ env.MARKET }} 시장 장마감 후 보고서입니다.
+          attachments: ${{ env.ATTACHMENTS }}

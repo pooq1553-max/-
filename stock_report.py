@@ -687,16 +687,6 @@ def generate_report(all_data, pct_h_min=90, tv_top_pct=30, market="ALL"):
     w("=" * 70)
     w()
 
-    # 리스크 대시보드
-    try:
-        risk = scan_risk_indicators(market)
-        risk_section = format_risk_section(risk, market)
-        if risk_section:
-            buf.write(risk_section)
-    except Exception as e:
-        w(f"  [리스크 지표 로딩 실패: {e}]")
-        w()
-
     if all_data.empty:
         w("  데이터 없음.")
         return buf.getvalue()
@@ -1261,6 +1251,282 @@ def run_premarket(output=None):
     return filepath
 
 
+def scan_minervini(symbols, min_cap=5e9):
+    """미너비니 SEPA 기준 피봇바이 종목 스캔 (나스닥).
+
+    Stage 2 Trend Template:
+    - 가격 > 50MA > 150MA > 200MA
+    - 200MA 최소 1개월 이상 상승 추세
+    - 가격이 52주 저점 대비 25% 이상 위
+    - 가격이 52주 고점 대비 75% 이상 (25% 이내)
+
+    VCP (Volatility Contraction Pattern):
+    - 최근 수축 구간의 변동폭이 이전보다 좁아짐
+    - 피봇 라인 = 최근 수축 구간의 고점
+
+    Pivot Buy:
+    - 당일 종가가 피봇 라인 돌파
+    - 돌파 시 거래량이 평균 대비 1.5배 이상
+    """
+    print(f"  [미너비니] {len(symbols)}개 종목 피봇바이 스캔 중...", file=sys.stderr)
+    raw = yf.download(symbols, period="1y", interval="1d",
+                      group_by="ticker", progress=False, threads=True)
+    results = []
+
+    for i, sym in enumerate(symbols):
+        try:
+            t = yf.Ticker(sym)
+            fi = t.fast_info
+            mc = getattr(fi, "market_cap", 0) or 0
+            if mc < min_cap:
+                continue
+
+            if len(symbols) == 1:
+                closes = raw["Close"].dropna()
+                highs = raw["High"].dropna()
+                lows = raw["Low"].dropna()
+                volumes = raw["Volume"].dropna()
+            else:
+                closes = raw[(sym, "Close")].dropna()
+                highs = raw[(sym, "High")].dropna()
+                lows = raw[(sym, "Low")].dropna()
+                volumes = raw[(sym, "Volume")].dropna()
+
+            if len(closes) < 200:
+                continue
+
+            price = closes.iloc[-1]
+            ma50 = closes.tail(50).mean()
+            ma150 = closes.tail(150).mean()
+            ma200 = closes.tail(200).mean()
+
+            # Stage 2 Trend Template
+            if not (price > ma50 > ma150 > ma200):
+                continue
+
+            # 200MA 상승 확인 (20일 전 대비)
+            ma200_prev = closes.iloc[-220:-200].mean() if len(closes) >= 220 else closes.head(200).mean()
+            if ma200 <= ma200_prev:
+                continue
+
+            # 52주 고저 체크
+            h52 = highs.max()
+            l52 = lows.min()
+            if l52 <= 0 or h52 <= 0:
+                continue
+            pct_above_low = ((price - l52) / l52) * 100
+            pct_from_high = (price / h52) * 100
+            if pct_above_low < 25:
+                continue
+            if pct_from_high < 75:
+                continue
+
+            # VCP 감지: 최근 60일 내 수축 패턴 찾기
+            recent_60 = closes.tail(60)
+            recent_highs = highs.tail(60)
+            recent_lows = lows.tail(60)
+
+            # 3구간으로 나눠서 변동폭 비교 (20일씩)
+            ranges = []
+            for j in range(3):
+                seg_h = recent_highs.iloc[j*20:(j+1)*20]
+                seg_l = recent_lows.iloc[j*20:(j+1)*20]
+                if len(seg_h) > 0 and len(seg_l) > 0:
+                    seg_range = (seg_h.max() - seg_l.min()) / seg_l.min() * 100
+                    ranges.append(seg_range)
+
+            if len(ranges) < 3:
+                continue
+
+            # 수축 확인: 마지막 구간이 첫 구간보다 좁아야 함
+            if ranges[2] >= ranges[0]:
+                continue
+
+            # 피봇 라인 = 최근 20일 고점
+            pivot_line = recent_highs.tail(20).max()
+
+            # 피봇 돌파 체크 (당일 종가가 피봇 이상)
+            if price < pivot_line * 0.98:
+                continue
+
+            # 거래량 체크
+            vol_today = volumes.iloc[-1]
+            avg_vol = volumes.tail(50).mean()
+            vol_ratio = vol_today / avg_vol if avg_vol > 0 else 1.0
+
+            # 점수 계산
+            score = 0
+            if price >= pivot_line:
+                score += 3  # 피봇 돌파
+            elif price >= pivot_line * 0.98:
+                score += 1  # 피봇 근접
+
+            if vol_ratio >= 2.0:
+                score += 3
+            elif vol_ratio >= 1.5:
+                score += 2
+            elif vol_ratio >= 1.0:
+                score += 1
+
+            # 수축률 (클수록 좋음)
+            contraction = (1 - ranges[2] / ranges[0]) * 100
+            if contraction >= 60:
+                score += 2
+            elif contraction >= 40:
+                score += 1
+
+            # Fwd P/E
+            try:
+                info = t.info
+                fwd_pe = info.get("forwardPE", None)
+            except Exception:
+                fwd_pe = None
+
+            results.append(dict(
+                sym=sym,
+                price=price,
+                pivot=pivot_line,
+                pct_from_pivot=((price / pivot_line) - 1) * 100,
+                ma50=ma50, ma150=ma150, ma200=ma200,
+                h52=h52, l52=l52,
+                pct_from_high=pct_from_high,
+                pct_above_low=pct_above_low,
+                vol_ratio=vol_ratio,
+                contraction=contraction,
+                ranges=ranges,
+                mc=mc,
+                score=score,
+                fwd_pe=fwd_pe,
+            ))
+
+            if (i + 1) % 20 == 0:
+                print(f"  ... {i+1}/{len(symbols)}", file=sys.stderr)
+        except Exception:
+            continue
+
+    return pd.DataFrame(results)
+
+
+def generate_minervini_report(df):
+    """미너비니 피봇바이 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 70)
+    w("  미너비니 Pivot Buy 스캔 (나스닥)")
+    w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준")
+    w(f"  조건: Stage 2 추세 + VCP 수축 + 피봇 돌파/근접")
+    w("=" * 70)
+    w()
+
+    if df.empty:
+        w("  조건을 충족하는 종목이 없습니다.")
+        w()
+        w("  미너비니 기준:")
+        w("    - 가격 > 50MA > 150MA > 200MA (Stage 2)")
+        w("    - 200일선 상승 중")
+        w("    - 52주 저점 대비 25%↑, 고점 대비 25% 이내")
+        w("    - 변동성 수축 패턴 (VCP)")
+        w("    - 피봇 라인 돌파/근접 + 거래량 증가")
+        w()
+        return buf.getvalue()
+
+    df = df.sort_values("score", ascending=False)
+
+    # 피봇 돌파 vs 근접 분리
+    breakout = df[df["pct_from_pivot"] >= 0]
+    near_pivot = df[df["pct_from_pivot"] < 0]
+
+    w(f"  피봇 돌파: {len(breakout)}개  |  피봇 근접 (2% 이내): {len(near_pivot)}개")
+    w()
+
+    if not breakout.empty:
+        w("-" * 70)
+        w("  [피봇 돌파] - 매수 타이밍!")
+        w("-" * 70)
+        w()
+        for _, r in breakout.iterrows():
+            name = get_name(r["sym"])
+            grade = "S" if r["score"] >= 7 else "A" if r["score"] >= 5 else "B"
+            w(f"  [{grade}] {name} ({r['sym']})")
+            w(f"      현재가: ${r['price']:,.2f}  |  피봇: ${r['pivot']:,.2f}  (+{r['pct_from_pivot']:.1f}% 돌파)")
+            w(f"      50MA: ${r['ma50']:,.2f}  >  150MA: ${r['ma150']:,.2f}  >  200MA: ${r['ma200']:,.2f}")
+            w(f"      52주 고가 대비: {r['pct_from_high']:.1f}%  |  52주 저점 대비: +{r['pct_above_low']:.0f}%")
+            w(f"      거래량: 평균 대비 {r['vol_ratio']:.1f}x  |  VCP 수축률: {r['contraction']:.0f}%")
+            fwd_pe_str = f"{r['fwd_pe']:.1f}" if pd.notna(r.get('fwd_pe')) and r.get('fwd_pe') else "-"
+            w(f"      시총: {fmt_cap(r['mc'], 'US')}  |  Fwd P/E: {fwd_pe_str}")
+            # 코멘트
+            comments = []
+            if r["vol_ratio"] >= 2.0:
+                comments.append("강한 거래량 돌파")
+            elif r["vol_ratio"] >= 1.5:
+                comments.append("거래량 확인됨")
+            else:
+                comments.append("거래량 미흡 - 내일 확인 필요")
+            if r["contraction"] >= 60:
+                comments.append("교과서적 VCP")
+            if r["pct_from_high"] >= 95:
+                comments.append("52주 신고가 임박")
+            w(f"      -> {', '.join(comments)}")
+            w()
+
+    if not near_pivot.empty:
+        w("-" * 70)
+        w("  [피봇 근접] - 매수 대기 (돌파 시 진입)")
+        w("-" * 70)
+        w()
+        for _, r in near_pivot.iterrows():
+            name = get_name(r["sym"])
+            w(f"  - {name} ({r['sym']}): ${r['price']:,.2f}  |  피봇: ${r['pivot']:,.2f} ({r['pct_from_pivot']:+.1f}%)")
+            w(f"    MA정렬: 50>{r['ma50']:,.0f} > 150>{r['ma150']:,.0f} > 200>{r['ma200']:,.0f}")
+            w(f"    VCP 수축: {r['contraction']:.0f}%  |  거래량: {r['vol_ratio']:.1f}x")
+            w()
+
+    w("=" * 70)
+    w("  매매 전략")
+    w("=" * 70)
+    w()
+    w("  [피봇 돌파 종목]")
+    w("    - 거래량 1.5x 이상 확인 후 진입")
+    w("    - 손절: 피봇 라인 -5~7% (또는 50MA 이탈)")
+    w("    - 목표: 1차 +10~15%, 2차 +20~25%")
+    w()
+    w("  [피봇 근접 종목]")
+    w("    - 돌파 확인 전까지 관망")
+    w("    - 돌파일 거래량 반드시 확인")
+    w("    - 가짜 돌파 (당일 장대 윗꼬리) 주의")
+    w()
+    w("-" * 70)
+    w("  주의: 본 보고서는 데이터 기반 자동 생성이며 투자 권유가 아닙니다.")
+    w("-" * 70)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_minervini(output=None):
+    """미너비니 피봇바이 스캔 실행."""
+    df = scan_minervini(US, min_cap=5e9)
+    report = generate_minervini_report(df)
+
+    print(report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"minervini_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def run_report(market="ALL", output=None, chart=True):
     """보고서 실행."""
     jobs = []
@@ -1279,10 +1545,8 @@ def run_report(market="ALL", output=None, chart=True):
     combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
     report = generate_report(combined, market=market)
 
-    # 출력
     print(report)
 
-    # 파일 저장
     if output:
         filepath = output
     else:
@@ -1292,26 +1556,7 @@ def run_report(market="ALL", output=None, chart=True):
         f.write(report)
     print(f"  보고서 저장: {filepath}", file=sys.stderr)
 
-    # 차트 생성
-    chart_paths = []
-    if chart:
-        import os
-        chart_markets = []
-        if market in ("US", "ALL"):
-            chart_markets.append("US")
-        if market in ("KR", "ALL"):
-            chart_markets.append("KR")
-        for m in chart_markets:
-            try:
-                chart_dir = os.path.dirname(filepath) or "."
-                chart_path = os.path.join(chart_dir, f"risk_chart_{m}_{datetime.now().strftime('%Y%m%d_%H%M')}.png")
-                result = generate_risk_chart(market=m, output_path=chart_path)
-                if result:
-                    chart_paths.append(result)
-            except Exception as e:
-                print(f"  차트 생성 실패 ({m}): {e}", file=sys.stderr)
-
-    return filepath, chart_paths
+    return filepath
 
 
 def main():
@@ -1324,15 +1569,19 @@ def main():
                         help="미국 프리마켓 52주 신고가 스캔")
     parser.add_argument("--sector", action="store_true",
                         help="섹터별 성과 보고서 생성")
+    parser.add_argument("--minervini", action="store_true",
+                        help="미너비니 SEPA 피봇바이 스캔 (나스닥)")
     parser.add_argument("--no-chart", action="store_true",
                         help="차트 생성 비활성화")
     args = parser.parse_args()
-    if args.premarket:
+    if args.minervini:
+        run_minervini(output=args.output)
+    elif args.premarket:
         run_premarket(output=args.output)
     elif args.sector:
         run_sector(market=args.market, output=args.output, chart=not args.no_chart)
     else:
-        run_report(market=args.market, output=args.output, chart=not args.no_chart)
+        run_report(market=args.market, output=args.output)
 
 
 if __name__ == "__main__":
