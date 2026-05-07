@@ -1527,6 +1527,307 @@ def run_minervini(output=None):
     return filepath
 
 
+def scan_longbase(symbols, min_cap=5e9):
+    """롱베이스 돌파 + 첫 HTF 스캔.
+
+    롱베이스: 3개월(60거래일) 이상 횡보 구간 형성
+    돌파: 당일 종가가 베이스 상단을 넘김
+    첫 HTF: 최근 6개월 내 이전 돌파 이력 없음
+    거래량: 돌파일 거래량 평균 대비 증가
+    """
+    print(f"  [롱베이스] {len(symbols)}개 종목 스캔 중...", file=sys.stderr)
+    raw = yf.download(symbols, period="1y", interval="1d",
+                      group_by="ticker", progress=False, threads=True)
+    results = []
+
+    for i, sym in enumerate(symbols):
+        try:
+            t = yf.Ticker(sym)
+            fi = t.fast_info
+            mc = getattr(fi, "market_cap", 0) or 0
+            if mc < min_cap:
+                continue
+
+            if len(symbols) == 1:
+                closes = raw["Close"].dropna()
+                highs = raw["High"].dropna()
+                lows = raw["Low"].dropna()
+                volumes = raw["Volume"].dropna()
+            else:
+                closes = raw[(sym, "Close")].dropna()
+                highs = raw[(sym, "High")].dropna()
+                lows = raw[(sym, "Low")].dropna()
+                volumes = raw[(sym, "Volume")].dropna()
+
+            if len(closes) < 120:
+                continue
+
+            price = closes.iloc[-1]
+
+            # --- 롱베이스 감지 ---
+            # 최근 60~120일 구간에서 횡보 베이스 찾기
+            # 베이스 = 가격 범위가 좁은 구간 (레인지 15% 이내)
+            best_base = None
+            for base_len in [90, 75, 60]:
+                if len(closes) < base_len + 10:
+                    continue
+                # 베이스 구간: 돌파 전일까지 (최근 5일 제외)
+                base_closes = closes.iloc[-(base_len+5):-5]
+                base_highs = highs.iloc[-(base_len+5):-5]
+                base_lows = lows.iloc[-(base_len+5):-5]
+
+                base_top = base_highs.max()
+                base_bottom = base_lows.min()
+                if base_bottom <= 0:
+                    continue
+                base_range_pct = (base_top - base_bottom) / base_bottom * 100
+
+                # 베이스 범위 25% 이내면 횡보로 인정
+                if base_range_pct <= 25:
+                    best_base = dict(
+                        length=base_len,
+                        top=base_top,
+                        bottom=base_bottom,
+                        range_pct=base_range_pct,
+                        mid=(base_top + base_bottom) / 2,
+                    )
+                    break
+
+            if not best_base:
+                continue
+
+            # --- 돌파 확인 ---
+            # 당일 종가가 베이스 상단 돌파
+            if price < best_base["top"]:
+                # 근접 체크 (2% 이내)
+                if price < best_base["top"] * 0.98:
+                    continue
+                breakout_status = "near"
+            else:
+                breakout_status = "breakout"
+
+            # --- 첫 HTF 확인 ---
+            # 최근 6개월(120일) 내 베이스 상단 위에서 마감한 적이 거의 없어야 함
+            recent_120 = closes.tail(120)
+            days_above = (recent_120 > best_base["top"]).sum()
+            # 5일 이하만 허용 (첫 돌파에 가까움)
+            if days_above > 10:
+                continue
+
+            # --- 거래량 확인 ---
+            vol_today = volumes.iloc[-1]
+            avg_vol = volumes.tail(50).mean()
+            vol_ratio = vol_today / avg_vol if avg_vol > 0 else 1.0
+
+            # --- 추세 확인 ---
+            ma50 = closes.tail(50).mean()
+            ma200 = closes.tail(200).mean() if len(closes) >= 200 else closes.mean()
+
+            # 52주 고저
+            h52 = highs.max()
+            l52 = lows.min()
+            pct_from_high = (price / h52 * 100) if h52 > 0 else 0
+
+            # --- 등급 ---
+            score = 0
+            # 돌파 여부
+            if breakout_status == "breakout":
+                score += 3
+            else:
+                score += 1
+
+            # 거래량
+            if vol_ratio >= 2.0:
+                score += 3
+            elif vol_ratio >= 1.5:
+                score += 2
+            elif vol_ratio >= 1.0:
+                score += 1
+
+            # 베이스 길이 (길수록 에너지 축적)
+            if best_base["length"] >= 90:
+                score += 2
+            elif best_base["length"] >= 75:
+                score += 1
+
+            # 베이스 타이트함
+            if best_base["range_pct"] <= 12:
+                score += 2
+            elif best_base["range_pct"] <= 18:
+                score += 1
+
+            # 첫 HTF (이전 돌파 적을수록)
+            if days_above <= 3:
+                score += 2
+            elif days_above <= 5:
+                score += 1
+
+            # 추세 보너스
+            if price > ma50 > ma200:
+                score += 1
+
+            # Fwd P/E
+            try:
+                info = t.info
+                fwd_pe = info.get("forwardPE", None)
+            except Exception:
+                fwd_pe = None
+
+            results.append(dict(
+                sym=sym,
+                price=price,
+                base_top=best_base["top"],
+                base_bottom=best_base["bottom"],
+                base_length=best_base["length"],
+                base_range=best_base["range_pct"],
+                breakout_status=breakout_status,
+                pct_above_base=((price / best_base["top"]) - 1) * 100,
+                vol_ratio=vol_ratio,
+                days_above=days_above,
+                ma50=ma50, ma200=ma200,
+                h52=h52, l52=l52,
+                pct_from_high=pct_from_high,
+                mc=mc,
+                score=score,
+                fwd_pe=fwd_pe,
+            ))
+
+            if (i + 1) % 20 == 0:
+                print(f"  ... {i+1}/{len(symbols)}", file=sys.stderr)
+        except Exception:
+            continue
+
+    return pd.DataFrame(results)
+
+
+def generate_longbase_report(df):
+    """롱베이스 돌파 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 70)
+    w("  롱베이스 돌파 + 첫 HTF 스캔 (나스닥)")
+    w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준")
+    w(f"  조건: 3개월+ 횡보 베이스 → 상단 돌파 + 거래량 확인")
+    w("=" * 70)
+    w()
+
+    if df.empty:
+        w("  조건을 충족하는 종목이 없습니다.")
+        w()
+        w("  롱베이스 돌파 기준:")
+        w("    - 60~90일 이상 횡보 (가격 범위 25% 이내)")
+        w("    - 베이스 상단 돌파 (또는 2% 이내 근접)")
+        w("    - 최근 6개월 내 첫 돌파 (HTF)")
+        w("    - 거래량 증가 확인")
+        w()
+        return buf.getvalue()
+
+    df = df.sort_values("score", ascending=False)
+
+    breakout = df[df["breakout_status"] == "breakout"]
+    near = df[df["breakout_status"] == "near"]
+
+    w(f"  돌파 확정: {len(breakout)}개  |  돌파 임박 (2% 이내): {len(near)}개")
+    w()
+
+    if not breakout.empty:
+        w("-" * 70)
+        w("  [롱베이스 돌파] - 첫 HTF! 보유 진입 타이밍")
+        w("-" * 70)
+        w()
+        for _, r in breakout.iterrows():
+            name = get_name(r["sym"])
+            grade = "S" if r["score"] >= 10 else "A" if r["score"] >= 7 else "B"
+            w(f"  [{grade}] {name} ({r['sym']})")
+            w(f"      현재가: ${r['price']:,.2f}  |  베이스 상단: ${r['base_top']:,.2f}  (+{r['pct_above_base']:.1f}% 돌파)")
+            w(f"      베이스: {r['base_length']}일간 횡보  |  범위: {r['base_range']:.1f}% (${r['base_bottom']:,.2f}~${r['base_top']:,.2f})")
+            w(f"      거래량: 평균 대비 {r['vol_ratio']:.1f}x  |  52주 고가 대비: {r['pct_from_high']:.1f}%")
+            fwd_pe_str = f"{r['fwd_pe']:.1f}" if pd.notna(r.get('fwd_pe')) and r.get('fwd_pe') else "-"
+            w(f"      시총: {fmt_cap(r['mc'], 'US')}  |  Fwd P/E: {fwd_pe_str}")
+            w(f"      첫 HTF 확인: 최근 120일 중 상단 위 마감 {r['days_above']}일뿐")
+            comments = []
+            if r["vol_ratio"] >= 2.0:
+                comments.append("강한 거래량 돌파!")
+            elif r["vol_ratio"] >= 1.5:
+                comments.append("거래량 확인됨")
+            else:
+                comments.append("거래량 미흡 - 추가 확인 필요")
+            if r["base_length"] >= 90:
+                comments.append(f"{r['base_length']}일 장기 베이스 (에너지 축적)")
+            if r["base_range"] <= 12:
+                comments.append("타이트한 베이스 (기관 매집 가능성)")
+            if r["pct_from_high"] >= 95:
+                comments.append("52주 신고가 임박")
+            if r["price"] > r["ma50"] > r["ma200"]:
+                comments.append("상승 추세 정렬")
+            w(f"      -> {', '.join(comments)}")
+            w()
+
+    if not near.empty:
+        w("-" * 70)
+        w("  [돌파 임박] - 베이스 상단 2% 이내, 돌파 대기")
+        w("-" * 70)
+        w()
+        for _, r in near.iterrows():
+            name = get_name(r["sym"])
+            grade = "S" if r["score"] >= 10 else "A" if r["score"] >= 7 else "B"
+            w(f"  [{grade}] {name} ({r['sym']}): ${r['price']:,.2f}  |  상단: ${r['base_top']:,.2f} ({r['pct_above_base']:+.1f}%)")
+            w(f"      베이스 {r['base_length']}일 / 범위 {r['base_range']:.1f}%  |  거래량: {r['vol_ratio']:.1f}x")
+            w()
+
+    w("=" * 70)
+    w("  매매 전략 (롱베이스 돌파)")
+    w("=" * 70)
+    w()
+    w("  [핵심] 롱베이스 돌파 + 첫 HTF = 보유해야 하는 자리")
+    w("    - 따라 들어가는 것보다 돌파 시점에 잡는 게 중요")
+    w("    - 거래량 1.5x 이상 확인 후 진입")
+    w()
+    w("  [진입]")
+    w("    - 베이스 상단 돌파 확인 (종가 기준)")
+    w("    - 돌파일 거래량 필수 확인")
+    w("    - 갭업 돌파 시 시초가 진입 가능")
+    w()
+    w("  [손절]")
+    w("    - 베이스 상단 아래 재진입 시 (-3~5%)")
+    w("    - 또는 50MA 이탈 시")
+    w()
+    w("  [목표]")
+    w("    - 1차: 베이스 범위만큼 (측정 목표치)")
+    w("    - 2차: 추세 추종, 20MA 이탈 시 청산")
+    w()
+    w("-" * 70)
+    w("  주의: 본 보고서는 데이터 기반 자동 생성이며 투자 권유가 아닙니다.")
+    w("-" * 70)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_longbase(output=None):
+    """롱베이스 돌파 스캔 실행."""
+    df = scan_longbase(US, min_cap=5e9)
+    report = generate_longbase_report(df)
+
+    print(report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"longbase_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def run_report(market="ALL", output=None, chart=True):
     """보고서 실행."""
     jobs = []
@@ -1571,11 +1872,15 @@ def main():
                         help="섹터별 성과 보고서 생성")
     parser.add_argument("--minervini", action="store_true",
                         help="미너비니 SEPA 피봇바이 스캔 (나스닥)")
+    parser.add_argument("--longbase", action="store_true",
+                        help="롱베이스 돌파 + 첫 HTF 스캔 (나스닥)")
     parser.add_argument("--no-chart", action="store_true",
                         help="차트 생성 비활성화")
     args = parser.parse_args()
     if args.minervini:
         run_minervini(output=args.output)
+    elif args.longbase:
+        run_longbase(output=args.output)
     elif args.premarket:
         run_premarket(output=args.output)
     elif args.sector:
