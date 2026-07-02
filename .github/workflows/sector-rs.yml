@@ -2,9 +2,10 @@ name: US Sector RS Ranking
 
 on:
   schedule:
-    # 미국 장 마감(16:00 ET) 후 여유 시간을 두고 실행.
-    # 21:30 UTC ≈ 서머타임 기준 17:30 ET, 표준시 16:30 ET.
-    - cron: '30 21 * * 1-5'
+    # 20:30 UTC = 서머타임 기준 16:30 ET (미장 마감 30분 후)
+    # 표준시(11~3월) 기준으로는 15:30 ET지만 데이터 갱신에는 문제 없음.
+    # 기존 stock-report 워크플로와 동일 시간대로 맞춤 (KST 05:30 도착).
+    - cron: '30 20 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -25,14 +26,39 @@ jobs:
       - name: Install dependencies
         run: pip install yfinance pandas numpy
 
+      - name: Set date
+        run: echo "TODAY=$(date -u +%Y-%m-%d)" >> $GITHUB_ENV
+
       - name: Compute ranking
         run: python3 sector_rs.py --out-dir reports
+
+      - name: Read email body
+        id: body
+        run: |
+          {
+            echo 'BODY<<EOF'
+            cat reports/sector_rs.txt
+            echo EOF
+          } >> $GITHUB_ENV
+
+      - name: Send email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_ADDRESS }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "[미장] 섹터 ETF 수급 순위 - ${{ env.TODAY }}"
+          to: pooq1553@gmail.com
+          from: 섹터수급봇
+          body: ${{ env.BODY }}
+          attachments: reports/sector_rs.md,reports/sector_rs.csv
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add reports/sector_rs.csv reports/sector_rs.md
+          git add reports/sector_rs.csv reports/sector_rs.md reports/sector_rs.txt
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else

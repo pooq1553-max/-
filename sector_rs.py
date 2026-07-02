@@ -27,6 +27,8 @@ SECTORS: dict[str, str] = {
     "XLB": "소재",
     "XLRE": "부동산",
     "XLC": "커뮤니케이션",
+    "SMH": "반도체(SMH)",
+    "SOXX": "반도체(SOXX)",
 }
 
 MOMENTUM_WINDOW = 20
@@ -53,7 +55,9 @@ def build_rank_table(scores: pd.DataFrame) -> pd.DataFrame:
 
 def render_markdown(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
     tickers = list(SECTORS.keys())
-    header_cells = [f"{SECTORS[t]}<br>({t})" for t in tickers]
+    header_cells = [
+        SECTORS[t] if t in SECTORS[t] else f"{SECTORS[t]}<br>({t})" for t in tickers
+    ]
     lines = ["# US 섹터 ETF 수급(거래량 가중 모멘텀) 순위", ""]
     lines.append(f"- 지표: 20일 모멘텀 × 상대 거래량(60일 평균 대비) 누적합")
     lines.append(f"- 숫자 = 순위 (1이 가장 강함, {len(tickers)}가 가장 약함)")
@@ -80,6 +84,36 @@ def render_markdown(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def render_text(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
+    tickers = list(SECTORS.keys())
+    col_width = max(6, max(len(SECTORS[t]) for t in tickers))
+    header = "날짜".ljust(12) + "".join(SECTORS[t].ljust(col_width) for t in tickers)
+    sep = "-" * len(header)
+    lines = [
+        "US 섹터 ETF 수급(거래량 가중 모멘텀) 순위",
+        "지표: 20일 모멘텀 × 상대 거래량(60일 평균) 누적합",
+        f"1 = 가장 강함, {len(tickers)} = 가장 약함  |  최근 {DISPLAY_DAYS} 거래일",
+        "",
+        header,
+        sep,
+    ]
+    for date, row in ranks.iterrows():
+        cells = "".join(
+            (f"{int(row[t])}" if pd.notna(row[t]) else "-").ljust(col_width) for t in tickers
+        )
+        lines.append(date.strftime("%Y-%m-%d").ljust(12) + cells)
+    lines.append("")
+    last_date = ranks.index[-1]
+    last_ranks = ranks.loc[last_date].dropna().sort_values()
+    last_scores = scores.loc[last_date]
+    lines.append(f"[{last_date.strftime('%Y-%m-%d')} 상세]")
+    for ticker, rank in last_ranks.items():
+        lines.append(
+            f"  {int(rank):>2}. {SECTORS[ticker]:<14} {ticker:<5}  score={last_scores[ticker]:+.4f}"
+        )
+    return "\n".join(lines)
+
+
 def fetch_data(tickers: list[str], period: str = "6mo") -> tuple[pd.DataFrame, pd.DataFrame]:
     data = yf.download(
         tickers,
@@ -99,6 +133,7 @@ def main() -> None:
     parser.add_argument("--out-dir", default="reports", help="출력 디렉토리")
     parser.add_argument("--csv", default="sector_rs.csv", help="CSV 파일명 (순위 이력)")
     parser.add_argument("--md", default="sector_rs.md", help="Markdown 파일명 (표시용)")
+    parser.add_argument("--txt", default="sector_rs.txt", help="Plain text 파일명 (이메일 본문)")
     args = parser.parse_args()
 
     tickers = list(SECTORS.keys())
@@ -123,7 +158,10 @@ def main() -> None:
     md_path = out_dir / args.md
     md_path.write_text(render_markdown(ranks, scores), encoding="utf-8")
 
-    print(f"Wrote {csv_path} and {md_path}")
+    txt_path = out_dir / args.txt
+    txt_path.write_text(render_text(ranks, scores), encoding="utf-8")
+
+    print(f"Wrote {csv_path}, {md_path}, and {txt_path}")
     print(f"Latest date: {ranks.index[-1].strftime('%Y-%m-%d')}")
 
 
