@@ -1,0 +1,41 @@
+name: US Sector RS Ranking
+
+on:
+  schedule:
+    # 미국 장 마감(16:00 ET) 후 여유 시간을 두고 실행.
+    # 21:30 UTC ≈ 서머타임 기준 17:30 ET, 표준시 16:30 ET.
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas numpy
+
+      - name: Compute ranking
+        run: python3 sector_rs.py --out-dir reports
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sector_rs.csv reports/sector_rs.md
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update sector RS ranking $(date -u +%Y-%m-%d)"
+            git push
+          fi
