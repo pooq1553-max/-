@@ -81,7 +81,7 @@ def render_markdown(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
             f"| {int(rank)} | {SECTORS[ticker]} | {ticker} | {last_scores[ticker]:+.4f} |"
         )
     lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def render_text(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
@@ -111,7 +111,7 @@ def render_text(ranks: pd.DataFrame, scores: pd.DataFrame) -> str:
         lines.append(
             f"  {int(rank):>2}. {SECTORS[ticker]:<14} {ticker:<5}  score={last_scores[ticker]:+.4f}"
         )
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def fetch_data(tickers: list[str], period: str = "6mo") -> tuple[pd.DataFrame, pd.DataFrame]:

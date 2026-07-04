@@ -36,10 +36,11 @@ jobs:
         id: body
         run: |
           {
-            echo 'BODY<<EOF'
+            echo 'BODY<<SECTORRS_EOF'
             cat reports/sector_rs.txt
-            echo EOF
-          } >> $GITHUB_ENV
+            printf '\n'
+            echo SECTORRS_EOF
+          } >> "$GITHUB_ENV"
 
       - name: Send email
         uses: dawidd6/action-send-mail@v3
