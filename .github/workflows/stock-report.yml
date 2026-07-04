@@ -72,14 +72,6 @@ jobs:
           python3 stock_report.py --longbase \
             --output reports/longbase_${{ env.TODAY }}.txt
 
-      - name: Generate 52W-high pullback charts (US only)
-        if: env.MARKET == 'US' || env.MARKET == 'ALL'
-        run: |
-          python3 new_high_charts.py \
-            --out-dir reports \
-            --image new_high_charts_${{ env.TODAY }}.png \
-            --text new_high_charts_${{ env.TODAY }}.txt
-
       - name: Collect attachments
         run: |
           FILES="reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt"
@@ -88,12 +80,6 @@ jobs:
           fi
           if [ -f "reports/longbase_${{ env.TODAY }}.txt" ]; then
             FILES="$FILES,reports/longbase_${{ env.TODAY }}.txt"
-          fi
-          if [ -f "reports/new_high_charts_${{ env.TODAY }}.png" ]; then
-            FILES="$FILES,reports/new_high_charts_${{ env.TODAY }}.png"
-          fi
-          if [ -f "reports/new_high_charts_${{ env.TODAY }}.txt" ]; then
-            FILES="$FILES,reports/new_high_charts_${{ env.TODAY }}.txt"
           fi
           echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
@@ -109,11 +95,4 @@ jobs:
           from: 투자보고서봇
           body: |
             ${{ env.MARKET }} 시장 장마감 후 보고서입니다.
-
-            첨부:
-            - 52주 신고가 + 거래대금 보고서 (텍스트)
-            - 미너비니 SEPA / 롱베이스 돌파 스캔 (US)
-            - new_high_charts_*.png: 52주 신고가 종목 7일 가격 + Stochastic %K 그리드 차트
-              → 초록색 셀(%K ≤ 30)이 눌림목 매수 매력 구간
-            - new_high_charts_*.txt: Stochastic 낮은 순 랭킹
           attachments: ${{ env.ATTACHMENTS }}
