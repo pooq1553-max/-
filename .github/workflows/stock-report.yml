@@ -42,7 +42,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance pandas matplotlib numpy
+        run: pip install yfinance pandas matplotlib numpy lxml beautifulsoup4 html5lib
 
       - name: Set email subject
         run: |
@@ -72,6 +72,14 @@ jobs:
           python3 stock_report.py --longbase \
             --output reports/longbase_${{ env.TODAY }}.txt
 
+      - name: Generate Stage 2 base-consolidation scan (US only)
+        if: env.MARKET == 'US' || env.MARKET == 'ALL'
+        run: |
+          python3 stage2_scan.py \
+            --out-dir reports \
+            --txt stage2_${{ env.TODAY }}.txt \
+            --png stage2_${{ env.TODAY }}.png
+
       - name: Collect attachments
         run: |
           FILES="reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt"
@@ -80,6 +88,12 @@ jobs:
           fi
           if [ -f "reports/longbase_${{ env.TODAY }}.txt" ]; then
             FILES="$FILES,reports/longbase_${{ env.TODAY }}.txt"
+          fi
+          if [ -f "reports/stage2_${{ env.TODAY }}.txt" ]; then
+            FILES="$FILES,reports/stage2_${{ env.TODAY }}.txt"
+          fi
+          if [ -f "reports/stage2_${{ env.TODAY }}.png" ]; then
+            FILES="$FILES,reports/stage2_${{ env.TODAY }}.png"
           fi
           echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
@@ -95,4 +109,12 @@ jobs:
           from: 투자보고서봇
           body: |
             ${{ env.MARKET }} 시장 장마감 후 보고서입니다.
+
+            첨부:
+            - 52주 신고가 + 거래대금 보고서
+            - 미너비니 SEPA 피봇바이 스캔 (US)
+            - 롱베이스 돌파 스캔 (US)
+            - Stage 2 + 베이스 다지기 스캔 (US, 나스닥100+S&P500)
+              → stage2_YYYYMMDD.txt: Trend Template 통과 종목 순위
+              → stage2_YYYYMMDD.png: 상위 20종목 차트 (베이스=노란 밴드, 피봇=점선)
           attachments: ${{ env.ATTACHMENTS }}
