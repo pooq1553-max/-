@@ -4,17 +4,30 @@ CLI face-swap tool: takes a face from `--source`, replaces the face(s) in `--tar
 
 Uses [InsightFace](https://github.com/deepinsight/insightface)'s `buffalo_l` for detection/landmarks and the `inswapper_128.onnx` swap model (SimSwap-family, ONNX).
 
-## Quick start (Colab)
+## Quick start — Windows one-click
 
-파이썬 설치 없이 브라우저에서 바로 쓰고 싶으면 `faceswap_colab.ipynb`을
-Google Colab에 열고 셀을 순서대로 실행하세요. 사진 두 장 업로드하면 결과가
-자동 다운로드됩니다.
+1. 이 레포를 ZIP으로 받아서 압축 풀기 (또는 `git clone`)
+2. 폴더에서 **`setup.bat` 더블클릭** (Python·라이브러리·모델 자동 설치, 5~10분)
+3. 바탕화면에 생긴 **FaceSwap** 아이콘 더블클릭 → 브라우저에 UI가 뜸
+4. 사진 두 장 드래그해서 올리고 **스왑 실행** 버튼
 
-## Install (local)
+앱 종료는 콘솔 창을 닫으면 됨. 사진은 100% 로컬 처리, 어디로도 안 올라감.
+
+자세한 Windows 설치 안내와 트러블슈팅은 [WINDOWS.md](./WINDOWS.md).
+
+## Quick start — Colab (파이썬 설치 없이)
+
+`faceswap_colab.ipynb`을 Google Colab에 열고 셀을 순서대로 실행. 사진 두 장
+업로드 → 결과 자동 다운로드. (사진은 구글 Colab 서버로 잠깐 올라감.)
+
+## Install (Linux/Mac, 수동)
 
 ```bash
 pip install -r requirements.txt
 python download_models.py
+python app.py     # GUI (브라우저)
+# 또는 CLI
+python -m faceswap -s face.jpg -t body.jpg -o out.jpg
 ```
 
 `download_models.py` fetches `inswapper_128.onnx` (~554 MB) into `./models/`. InsightFace's detector weights download themselves on first run.
