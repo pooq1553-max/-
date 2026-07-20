@@ -4,7 +4,13 @@ CLI face-swap tool: takes a face from `--source`, replaces the face(s) in `--tar
 
 Uses [InsightFace](https://github.com/deepinsight/insightface)'s `buffalo_l` for detection/landmarks and the `inswapper_128.onnx` swap model (SimSwap-family, ONNX).
 
-## Install
+## Quick start (Colab)
+
+파이썬 설치 없이 브라우저에서 바로 쓰고 싶으면 `faceswap_colab.ipynb`을
+Google Colab에 열고 셀을 순서대로 실행하세요. 사진 두 장 업로드하면 결과가
+자동 다운로드됩니다.
+
+## Install (local)
 
 ```bash
 pip install -r requirements.txt
