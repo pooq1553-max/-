@@ -97,4 +97,4 @@ def build_ui() -> gr.Blocks:
 
 
 if __name__ == "__main__":
-    build_ui().launch(inbrowser=True, server_name="127.0.0.1", server_port=7860, show_api=False)
+    build_ui().launch(inbrowser=True, server_name="127.0.0.1", server_port=7860)
