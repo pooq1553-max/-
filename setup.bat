@@ -85,17 +85,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ---- 5. Desktop shortcut ----
+REM ---- 5. Desktop shortcut (via a temporary .ps1 to avoid cmd/PS quoting pain) ----
 echo.
 echo Creating desktop shortcut...
-powershell -NoProfile -Command ^
-  "$WshShell = New-Object -ComObject WScript.Shell; ^
-   $s = $WshShell.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'FaceSwap.lnk')); ^
-   $s.TargetPath = '%CD%\run.bat'; ^
-   $s.WorkingDirectory = '%CD%'; ^
-   $s.IconLocation = '%SystemRoot%\System32\shell32.dll,220'; ^
-   $s.Description = 'FaceSwap local app'; ^
-   $s.Save()"
+set PSSCRIPT=%TEMP%\faceswap_shortcut.ps1
+> "%PSSCRIPT%" echo $WshShell = New-Object -ComObject WScript.Shell
+>>"%PSSCRIPT%" echo $lnk = [System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'FaceSwap.lnk')
+>>"%PSSCRIPT%" echo $s = $WshShell.CreateShortcut($lnk)
+>>"%PSSCRIPT%" echo $s.TargetPath = '%CD%\run.bat'
+>>"%PSSCRIPT%" echo $s.WorkingDirectory = '%CD%'
+>>"%PSSCRIPT%" echo $s.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
+>>"%PSSCRIPT%" echo $s.Description = 'FaceSwap local app'
+>>"%PSSCRIPT%" echo $s.Save()
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PSSCRIPT%"
+if errorlevel 1 (
+    echo   ^(shortcut creation failed - you can just double-click run.bat instead^)
+) else (
+    echo   Desktop shortcut created: FaceSwap
+)
+del "%PSSCRIPT%" >nul 2>&1
 
 echo.
 echo ===============================================
