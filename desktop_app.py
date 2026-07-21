@@ -25,9 +25,29 @@ from tkinter import (
 )
 
 import cv2
+import numpy as np
 from PIL import Image, ImageTk
 
 from faceswap.pipeline import FaceSwapPipeline
+
+
+def _imread_unicode(path: str):
+    """cv2.imread that works with non-ASCII paths on Windows."""
+    with open(path, "rb") as f:
+        data = np.frombuffer(f.read(), np.uint8)
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def _imwrite_unicode(path: str, img) -> bool:
+    p = Path(path)
+    ext = p.suffix if p.suffix else ".jpg"
+    ok, buf = cv2.imencode(ext, img)
+    if not ok:
+        return False
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(buf.tobytes())
+    return True
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "inswapper_128.onnx"
 THUMB = 320
@@ -172,8 +192,8 @@ class FaceSwapApp:
                 self.pipeline = FaceSwapPipeline(swap_model_path=DEFAULT_MODEL_PATH)
 
             self._set_status("얼굴 검출 중...")
-            src_img = cv2.imread(self.source_path, cv2.IMREAD_COLOR)
-            tgt_img = cv2.imread(self.target_path, cv2.IMREAD_COLOR)
+            src_img = _imread_unicode(self.source_path)
+            tgt_img = _imread_unicode(self.target_path)
             if src_img is None:
                 raise RuntimeError("소스 사진을 열 수 없어요.")
             if tgt_img is None:
@@ -225,7 +245,7 @@ class FaceSwapApp:
             initialfile="faceswap_result.jpg",
         )
         if path:
-            if not cv2.imwrite(path, self.result_bgr):
+            if not _imwrite_unicode(path, self.result_bgr):
                 messagebox.showerror("저장 실패", f"파일 저장에 실패했어요: {path}")
                 return
             messagebox.showinfo("저장 완료", f"저장됨:\n{path}")

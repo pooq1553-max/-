@@ -24,17 +24,23 @@ class FaceSwapPipeline:
     @staticmethod
     def _load(path: str | Path) -> np.ndarray:
         path = Path(path)
-        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        with open(path, "rb") as f:
+            data = np.frombuffer(f.read(), np.uint8)
+        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
         if img is None:
-            raise FileNotFoundError(f"could not read image: {path}")
+            raise FileNotFoundError(f"could not decode image: {path}")
         return img
 
     @staticmethod
     def _save(image_bgr: np.ndarray, path: str | Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if not cv2.imwrite(str(path), image_bgr):
-            raise IOError(f"could not write image: {path}")
+        ext = path.suffix if path.suffix else ".jpg"
+        ok, buf = cv2.imencode(ext, image_bgr)
+        if not ok:
+            raise IOError(f"could not encode image: {path}")
+        with open(path, "wb") as f:
+            f.write(buf.tobytes())
 
     def swap_files(
         self,
