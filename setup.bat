@@ -7,44 +7,48 @@ echo   FaceSwap - Windows one-time setup
 echo ===============================================
 echo.
 
-REM ---- 1. Python check ----
-where python >nul 2>&1
-if errorlevel 1 (
-    echo Python not found. Trying to install Python 3.11 via winget...
-    where winget >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo winget is not available on this Windows.
-        echo Please install Python 3.11 manually from:
-        echo   https://www.python.org/downloads/
-        echo Make sure to check "Add python.exe to PATH" during install.
-        echo Then re-run setup.bat.
-        pause
-        exit /b 1
-    )
-    winget install -e --id Python.Python.3.11 --scope user --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo.
-        echo winget install failed. Install Python 3.11 manually:
-        echo   https://www.python.org/downloads/
-        pause
-        exit /b 1
-    )
-    echo.
-    echo Python installed. Close this window, open a NEW Command Prompt,
-    echo then double-click setup.bat again.
-    pause
-    exit /b 0
+REM ---- 1. Python 3.11 check (via py launcher, avoids Store stub + wrong version) ----
+set PYCMD=
+py -3.11 --version >nul 2>&1
+if not errorlevel 1 (
+    set PYCMD=py -3.11
+    goto :got_python
 )
 
-for /f "tokens=2 delims= " %%v in ('python --version') do set PYVER=%%v
-echo Found Python !PYVER!
+REM Fallback: check plain python and confirm it's 3.11.x
+where python >nul 2>&1
+if not errorlevel 1 (
+    for /f "tokens=2 delims= " %%v in ('python --version 2^>^&1') do set PYVER=%%v
+    echo !PYVER! | findstr /r "^3\.11\." >nul
+    if not errorlevel 1 (
+        set PYCMD=python
+        goto :got_python
+    )
+)
+
+echo.
+echo Python 3.11 is required but was not found.
+echo.
+echo Install Python 3.11.9 from this direct link:
+echo   https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+echo.
+echo IMPORTANT: on the first installer screen, check
+echo   [x] Add python.exe to PATH
+echo.
+echo After installing, open a NEW Command Prompt window and
+echo double-click setup.bat again.
+pause
+exit /b 1
+
+:got_python
+for /f "tokens=2 delims= " %%v in ('%PYCMD% --version 2^>^&1') do set PYVER=%%v
+echo Found Python !PYVER!  ^(using: %PYCMD%^)
 echo.
 
 REM ---- 2. Create venv ----
 if not exist ".venv" (
     echo Creating virtual environment...
-    python -m venv .venv
+    %PYCMD% -m venv .venv
     if errorlevel 1 (
         echo Failed to create venv. Aborting.
         pause
