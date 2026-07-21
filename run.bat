@@ -16,3 +16,16 @@ echo (Keep this window open while using the app. Close it to shut down.)
 echo.
 
 python app.py
+set APPCODE=%ERRORLEVEL%
+
+echo.
+if not "%APPCODE%"=="0" (
+    echo ========================================
+    echo   App exited with error code %APPCODE%
+    echo   Scroll up to read the message above.
+    echo ========================================
+) else (
+    echo App exited normally.
+)
+echo.
+pause
