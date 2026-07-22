@@ -1,14 +1,12 @@
 """Native desktop face-swap app (tkinter).
 
-No browser, no Gradio. Only uses Python's built-in tkinter plus the packages
-already needed by the CLI (opencv, insightface, pillow).
-
-Run: `python desktop_app.py` (or double-click desktop.bat).
+Two tabs: 사진 스왑 and 동영상 스왑. No browser, no Gradio.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from tkinter import (
     BooleanVar,
@@ -29,10 +27,13 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from faceswap.pipeline import FaceSwapPipeline
+from faceswap.video import probe_video, swap_video
+
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "inswapper_128.onnx"
+THUMB = 300
 
 
 def _imread_unicode(path: str):
-    """cv2.imread that works with non-ASCII paths on Windows."""
     with open(path, "rb") as f:
         data = np.frombuffer(f.read(), np.uint8)
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
@@ -49,28 +50,59 @@ def _imwrite_unicode(path: str, img) -> bool:
         f.write(buf.tobytes())
     return True
 
-DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "inswapper_128.onnx"
-THUMB = 320
-
 
 class FaceSwapApp:
     def __init__(self) -> None:
         self.root = Tk()
         self.root.title("FaceSwap")
-        self.root.geometry("1080x720")
-        self.root.minsize(900, 640)
+        self.root.geometry("1080x780")
+        self.root.minsize(920, 700)
 
+        self.pipeline: FaceSwapPipeline | None = None
+        self._cancel = False
+
+        # photo state
         self.source_path: str | None = None
         self.target_path: str | None = None
         self.result_bgr = None
-        self.pipeline: FaceSwapPipeline | None = None
-        self.replace_all = BooleanVar(value=False)
+        self.replace_all_photo = BooleanVar(value=False)
         self.status_var = StringVar(value="사진 두 장을 선택한 뒤 '스왑 실행' 버튼을 누르세요.")
+
+        # video state
+        self.v_source_path: str | None = None
+        self.v_target_path: str | None = None
+        self.v_output_path: str | None = None
+        self.v_replace_all = BooleanVar(value=False)
+        self.v_target_info = StringVar(value="선택된 동영상 없음")
+        self.v_output_info = StringVar(value="선택된 저장 경로 없음")
+        self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
+        self.v_running = False
 
         self._build_ui()
 
+    # ------------------------------------------------------------ UI --------
     def _build_ui(self) -> None:
-        panels = Frame(self.root, padx=12, pady=12)
+        nb = ttk.Notebook(self.root)
+        nb.pack(fill="both", expand=True, padx=8, pady=8)
+
+        self.photo_tab = Frame(nb)
+        self.video_tab = Frame(nb)
+        nb.add(self.photo_tab, text="  사진 스왑  ")
+        nb.add(self.video_tab, text="  동영상 스왑  ")
+
+        self._build_photo_tab(self.photo_tab)
+        self._build_video_tab(self.video_tab)
+
+        note = Label(
+            self.root,
+            text="주의: 등장 인물의 동의가 있는 사진/영상에만 사용하세요.",
+            fg="#888",
+            font=("Segoe UI", 9),
+        )
+        note.pack(side="bottom", pady=6)
+
+    def _build_photo_tab(self, parent: Frame) -> None:
+        panels = Frame(parent, padx=8, pady=8)
         panels.pack(fill="both", expand=True)
 
         self.src_canvas = self._make_panel(panels, "소스 (얼굴 가져올 사진)", self._pick_source, 0)
@@ -80,47 +112,90 @@ class FaceSwapApp:
         for i in range(3):
             panels.columnconfigure(i, weight=1)
 
-        ctrl = Frame(self.root, padx=12, pady=6)
+        ctrl = Frame(parent, padx=8, pady=4)
         ctrl.pack(fill="x")
         Checkbutton(
             ctrl,
             text="타깃의 모든 얼굴 교체 (기본: 가장 큰 얼굴만)",
-            variable=self.replace_all,
+            variable=self.replace_all_photo,
         ).pack(side="left")
 
         self.swap_btn = Button(
-            self.root,
+            parent,
             text="스왑 실행",
-            command=self._run_swap,
+            command=self._run_photo_swap,
             font=("Segoe UI", 13, "bold"),
-            bg="#2e7d32",
-            fg="white",
-            padx=24,
-            pady=10,
-            relief="flat",
-            activebackground="#256428",
-            activeforeground="white",
+            bg="#2e7d32", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#256428", activeforeground="white",
         )
-        self.swap_btn.pack(pady=(8, 4))
+        self.swap_btn.pack(pady=(4, 4))
 
-        self.progress = ttk.Progressbar(self.root, mode="indeterminate", length=400)
+        self.progress = ttk.Progressbar(parent, mode="indeterminate", length=400)
         self.progress.pack(pady=4)
 
-        Label(self.root, textvariable=self.status_var, fg="#555").pack(pady=(2, 12))
+        Label(parent, textvariable=self.status_var, fg="#555").pack(pady=(2, 8))
 
-        note = Label(
-            self.root,
-            text="주의: 등장 인물의 동의가 있는 사진에만 사용하세요.",
-            fg="#888",
-            font=("Segoe UI", 9),
+    def _build_video_tab(self, parent: Frame) -> None:
+        top = Frame(parent, padx=8, pady=8)
+        top.pack(fill="both", expand=True)
+
+        # left: source photo
+        left = Frame(top, padx=6, pady=6)
+        left.grid(row=0, column=0, sticky="nsew")
+        Label(left, text="소스 (얼굴 가져올 사진)", font=("Segoe UI", 11, "bold")).pack()
+        self.v_src_canvas = Canvas(left, width=THUMB, height=THUMB, bg="#f0f0f0",
+                                    highlightthickness=1, highlightbackground="#ccc")
+        self.v_src_canvas.pack(pady=6)
+        Button(left, text="사진 선택...", command=self._v_pick_source, padx=12, pady=4).pack()
+
+        # right: video target + output
+        right = Frame(top, padx=6, pady=6)
+        right.grid(row=0, column=1, sticky="nsew")
+        Label(right, text="타깃 (얼굴 바꿀 동영상)", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(right, textvariable=self.v_target_info, fg="#333", wraplength=460, justify="left").pack(anchor="w", pady=4)
+        Button(right, text="동영상 선택...", command=self._v_pick_target, padx=12, pady=4).pack(anchor="w")
+
+        Label(right, text="").pack()
+        Label(right, text="저장 경로", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(right, textvariable=self.v_output_info, fg="#333", wraplength=460, justify="left").pack(anchor="w", pady=4)
+        Button(right, text="저장 위치 지정...", command=self._v_pick_output, padx=12, pady=4).pack(anchor="w")
+
+        top.columnconfigure(0, weight=0)
+        top.columnconfigure(1, weight=1)
+
+        ctrl = Frame(parent, padx=8, pady=4)
+        ctrl.pack(fill="x")
+        Checkbutton(
+            ctrl,
+            text="영상 속 모든 얼굴 교체 (기본: 프레임마다 가장 큰 얼굴만)",
+            variable=self.v_replace_all,
+        ).pack(side="left")
+
+        btns = Frame(parent)
+        btns.pack(pady=(4, 4))
+        self.v_start_btn = Button(
+            btns, text="동영상 스왑 시작", command=self._run_video_swap,
+            font=("Segoe UI", 13, "bold"),
+            bg="#1565c0", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#0d47a1", activeforeground="white",
         )
-        note.pack(side="bottom", pady=6)
+        self.v_start_btn.pack(side="left", padx=4)
+        self.v_cancel_btn = Button(
+            btns, text="취소", command=self._request_cancel,
+            padx=16, pady=8, state="disabled",
+        )
+        self.v_cancel_btn.pack(side="left", padx=4)
+
+        self.v_progress = ttk.Progressbar(parent, mode="determinate", length=520, maximum=100)
+        self.v_progress.pack(pady=6)
+        Label(parent, textvariable=self.v_status, fg="#555").pack(pady=(2, 8))
 
     def _make_panel(self, parent: Frame, title: str, pick_cb, col: int) -> Canvas:
         frame = Frame(parent, padx=6, pady=6)
         frame.grid(row=0, column=col, sticky="nsew")
         Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack()
-        canvas = Canvas(frame, width=THUMB, height=THUMB, bg="#f0f0f0", highlightthickness=1, highlightbackground="#ccc")
+        canvas = Canvas(frame, width=THUMB, height=THUMB, bg="#f0f0f0",
+                        highlightthickness=1, highlightbackground="#ccc")
         canvas.pack(pady=6)
         Button(frame, text="사진 선택...", command=pick_cb, padx=12, pady=4).pack()
         return canvas
@@ -129,26 +204,33 @@ class FaceSwapApp:
         frame = Frame(parent, padx=6, pady=6)
         frame.grid(row=0, column=col, sticky="nsew")
         Label(frame, text="결과", font=("Segoe UI", 11, "bold")).pack()
-        canvas = Canvas(frame, width=THUMB, height=THUMB, bg="#f0f0f0", highlightthickness=1, highlightbackground="#ccc")
+        canvas = Canvas(frame, width=THUMB, height=THUMB, bg="#f0f0f0",
+                        highlightthickness=1, highlightbackground="#ccc")
         canvas.pack(pady=6)
         save_btn = Button(frame, text="결과 저장...", command=self._save_result, padx=12, pady=4, state="disabled")
         save_btn.pack()
         return canvas, save_btn
 
+    # ---------------------------------------------------------- pipeline ---
+    def _ensure_pipeline(self, status_setter) -> FaceSwapPipeline:
+        if self.pipeline is None:
+            status_setter("모델 준비 중... (첫 실행이면 몇 분 걸릴 수 있음)")
+            if not DEFAULT_MODEL_PATH.exists():
+                raise FileNotFoundError(f"스왑 모델이 없어요: {DEFAULT_MODEL_PATH}\nsetup.bat 또는 download_models.py 를 먼저 실행하세요.")
+            self.pipeline = FaceSwapPipeline(swap_model_path=DEFAULT_MODEL_PATH)
+        return self.pipeline
+
+    # ------------------------------------------------------- photo helpers -
     def _pick_source(self) -> None:
-        path = filedialog.askopenfilename(
-            title="소스 사진 선택",
-            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")],
-        )
+        path = filedialog.askopenfilename(title="소스 사진 선택",
+            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
         if path:
             self.source_path = path
             self._show_file(self.src_canvas, path)
 
     def _pick_target(self) -> None:
-        path = filedialog.askopenfilename(
-            title="타깃 사진 선택",
-            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")],
-        )
+        path = filedialog.askopenfilename(title="타깃 사진 선택",
+            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
         if path:
             self.target_path = path
             self._show_file(self.tgt_canvas, path)
@@ -170,7 +252,7 @@ class FaceSwapApp:
         canvas.delete("all")
         canvas.create_image(THUMB // 2, THUMB // 2, image=photo, anchor="center")
 
-    def _run_swap(self) -> None:
+    def _run_photo_swap(self) -> None:
         if not self.source_path:
             messagebox.showwarning("사진 필요", "소스 사진(얼굴 가져올 사진)을 먼저 선택하세요.")
             return
@@ -181,17 +263,13 @@ class FaceSwapApp:
         self.save_btn.config(state="disabled")
         self.progress.start(10)
         self.status_var.set("처리 중...")
-        threading.Thread(target=self._swap_worker, daemon=True).start()
+        threading.Thread(target=self._photo_worker, daemon=True).start()
 
-    def _swap_worker(self) -> None:
+    def _photo_worker(self) -> None:
         try:
-            if self.pipeline is None:
-                self._set_status("모델 준비 중... (첫 실행이면 InsightFace 검출기 다운로드로 몇 분 걸릴 수 있음)")
-                if not DEFAULT_MODEL_PATH.exists():
-                    raise FileNotFoundError(f"스왑 모델이 없습니다: {DEFAULT_MODEL_PATH}\n먼저 setup.bat 또는 download_models.py를 실행하세요.")
-                self.pipeline = FaceSwapPipeline(swap_model_path=DEFAULT_MODEL_PATH)
+            pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.status_var.set, s))
 
-            self._set_status("얼굴 검출 중...")
+            self.root.after(0, self.status_var.set, "얼굴 검출 중...")
             src_img = _imread_unicode(self.source_path)
             tgt_img = _imread_unicode(self.target_path)
             if src_img is None:
@@ -199,32 +277,27 @@ class FaceSwapApp:
             if tgt_img is None:
                 raise RuntimeError("타깃 사진을 열 수 없어요.")
 
-            src_faces = self.pipeline.detector.detect(src_img)
-            tgt_faces = self.pipeline.detector.detect(tgt_img)
+            src_faces = pipe.detector.detect(src_img)
+            tgt_faces = pipe.detector.detect(tgt_img)
             if not src_faces:
-                raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.\n더 정면·고해상도 사진으로 시도해보세요.")
+                raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
             if not tgt_faces:
                 raise RuntimeError("타깃 사진에서 얼굴을 찾지 못했어요.")
 
-            src_face = self.pipeline.detector.select(src_faces, "largest")
-            to_replace = (
-                tgt_faces if self.replace_all.get() else [self.pipeline.detector.select(tgt_faces, "largest")]
-            )
-
-            self._set_status(f"스왑 중... ({len(to_replace)}개 얼굴)")
+            src_face = pipe.detector.select(src_faces, "largest")
+            to_replace = (tgt_faces if self.replace_all_photo.get()
+                          else [pipe.detector.select(tgt_faces, "largest")])
+            self.root.after(0, self.status_var.set, f"스왑 중... ({len(to_replace)}개 얼굴)")
             result = tgt_img.copy()
             for tf in to_replace:
-                result = self.pipeline.swapper.swap(result, tf, src_face)
+                result = pipe.swapper.swap(result, tf, src_face)
 
             self.result_bgr = result
-            self.root.after(0, self._on_done, result, None)
+            self.root.after(0, self._on_photo_done, result, None)
         except Exception as e:
-            self.root.after(0, self._on_done, None, str(e))
+            self.root.after(0, self._on_photo_done, None, str(e))
 
-    def _set_status(self, text: str) -> None:
-        self.root.after(0, self.status_var.set, text)
-
-    def _on_done(self, result, error) -> None:
+    def _on_photo_done(self, result, error) -> None:
         self.progress.stop()
         self.swap_btn.config(state="normal")
         if error:
@@ -238,17 +311,107 @@ class FaceSwapApp:
     def _save_result(self) -> None:
         if self.result_bgr is None:
             return
-        path = filedialog.asksaveasfilename(
-            title="결과 저장",
-            defaultextension=".jpg",
-            filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png")],
-            initialfile="faceswap_result.jpg",
-        )
+        path = filedialog.asksaveasfilename(title="결과 저장", defaultextension=".jpg",
+            filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png")], initialfile="faceswap_result.jpg")
         if path:
             if not _imwrite_unicode(path, self.result_bgr):
                 messagebox.showerror("저장 실패", f"파일 저장에 실패했어요: {path}")
                 return
             messagebox.showinfo("저장 완료", f"저장됨:\n{path}")
+
+    # -------------------------------------------------------- video handlers
+    def _v_pick_source(self) -> None:
+        path = filedialog.askopenfilename(title="소스 사진 선택",
+            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
+        if path:
+            self.v_source_path = path
+            self._show_file(self.v_src_canvas, path)
+
+    def _v_pick_target(self) -> None:
+        path = filedialog.askopenfilename(title="타깃 동영상 선택",
+            filetypes=[("동영상", "*.mp4 *.mov *.avi *.mkv *.webm"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        try:
+            info = probe_video(path)
+            dur = info["duration_sec"]
+            m, s = divmod(int(dur), 60)
+            self.v_target_info.set(
+                f"{Path(path).name}\n"
+                f"{info['width']}x{info['height']} · {info['fps']:.1f} fps · "
+                f"{info['frames']} frames · {m}:{s:02d}"
+            )
+            self.v_target_path = path
+        except Exception as e:
+            messagebox.showerror("동영상 오류", str(e))
+
+    def _v_pick_output(self) -> None:
+        path = filedialog.asksaveasfilename(title="결과 동영상 저장 경로",
+            defaultextension=".mp4",
+            filetypes=[("MP4", "*.mp4")], initialfile="faceswap_result.mp4")
+        if path:
+            self.v_output_path = path
+            self.v_output_info.set(path)
+
+    def _request_cancel(self) -> None:
+        self._cancel = True
+        self.v_status.set("취소 요청됨... 현재 프레임 처리 후 중단.")
+
+    def _run_video_swap(self) -> None:
+        if not self.v_source_path:
+            messagebox.showwarning("사진 필요", "소스 사진을 먼저 선택하세요.")
+            return
+        if not self.v_target_path:
+            messagebox.showwarning("동영상 필요", "타깃 동영상을 먼저 선택하세요.")
+            return
+        if not self.v_output_path:
+            messagebox.showwarning("저장 경로 필요", "결과 저장 경로를 지정하세요.")
+            return
+        self.v_running = True
+        self._cancel = False
+        self.v_start_btn.config(state="disabled")
+        self.v_cancel_btn.config(state="normal")
+        self.v_progress.config(mode="determinate", value=0)
+        self.v_status.set("시작 중...")
+        threading.Thread(target=self._video_worker, daemon=True).start()
+
+    def _video_progress(self, done: int, total: int, msg: str) -> None:
+        pct = (done / total * 100) if total > 0 else 0
+        self.root.after(0, lambda: (self.v_progress.config(value=pct),
+                                     self.v_status.set(f"{msg} · {pct:.1f}%")))
+
+    def _video_worker(self) -> None:
+        start = time.time()
+        try:
+            pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.v_status.set, s))
+            swap_video(
+                pipeline=pipe,
+                source_image_path=self.v_source_path,
+                target_video_path=self.v_target_path,
+                output_video_path=self.v_output_path,
+                replace_all=self.v_replace_all.get(),
+                progress=self._video_progress,
+                cancel=lambda: self._cancel,
+            )
+            elapsed = time.time() - start
+            self.root.after(0, self._on_video_done, None, elapsed)
+        except Exception as e:
+            self.root.after(0, self._on_video_done, str(e), None)
+
+    def _on_video_done(self, error, elapsed) -> None:
+        self.v_running = False
+        self.v_start_btn.config(state="normal")
+        self.v_cancel_btn.config(state="disabled")
+        if error:
+            self.v_progress.config(value=0)
+            self.v_status.set("에러 또는 취소됨")
+            messagebox.showerror("동영상 스왑 실패", error)
+            return
+        self.v_progress.config(value=100)
+        m, s = divmod(int(elapsed), 60)
+        self.v_status.set(f"완료 · 소요 {m}분 {s}초 · 저장 위치: {self.v_output_path}")
+        messagebox.showinfo("동영상 스왑 완료",
+            f"저장됨:\n{self.v_output_path}\n\n소요 시간: {m}분 {s}초")
 
     def run(self) -> None:
         self.root.mainloop()
