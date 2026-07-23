@@ -11,6 +11,7 @@ pip install yfinance pandas schedule
   python stock_report.py --premarket    # 미국 프리마켓 52주 신고가 스캔
 """
 import argparse
+import time
 import warnings
 import sys
 from datetime import datetime, timedelta
@@ -1828,6 +1829,192 @@ def run_longbase(output=None):
     return filepath
 
 
+def scan_kr_new_highs(top_n=100):
+    """전체 코스피+코스닥에서 거래대금 TOP N 뽑고, 그중 52주 신고가 종목 스캔 (pykrx).
+
+    - 거래대금 순위: 당일 전체 시장 기준 (KRX 데이터)
+    - 신고가: 당일 고가가 직전 52주 최고가 이상
+    - 근접(97%+)은 관찰 대상으로 별도 표시
+    """
+    from pykrx import stock as krx
+
+    end = krx.get_nearest_business_day_in_a_week()
+    start = (datetime.strptime(end, "%Y%m%d") - timedelta(days=380)).strftime("%Y%m%d")
+
+    print(f"  [국장] {end} 기준 전체 시장 거래대금 TOP {top_n} 조회 중...", file=sys.stderr)
+    snap = krx.get_market_ohlcv_by_ticker(end, market="ALL")
+    snap = snap[snap["거래대금"] > 0]
+    top = snap.sort_values("거래대금", ascending=False).head(top_n)
+
+    rows = []
+    for rank, (ticker, s) in enumerate(top.iterrows(), 1):
+        try:
+            name = krx.get_market_ticker_name(ticker)
+            if "스팩" in name:
+                continue
+
+            hist = krx.get_market_ohlcv_by_date(start, end, ticker)
+            if len(hist) < 30:
+                continue
+
+            close = hist["종가"].iloc[-1]
+            today_high = hist["고가"].iloc[-1]
+            prior_high = hist["고가"].iloc[:-1].max()
+            h52 = hist["고가"].max()
+            if h52 <= 0 or prior_high <= 0:
+                continue
+
+            broke = today_high >= prior_high        # 장중 신고가 갱신
+            closed_above = close >= prior_high       # 신고가 위에서 마감
+            pct_h = close / h52 * 100
+
+            # 신고가 갱신 or 97% 이상 근접만 수집
+            if not broke and pct_h < 97:
+                continue
+
+            rows.append(dict(
+                rank=rank, sym=ticker, name=name, price=close,
+                chg=s.get("등락률", 0) or 0, tv=s["거래대금"],
+                h52=h52, prior_high=prior_high, pct_h=pct_h,
+                broke=broke, closed_above=closed_above,
+            ))
+            time.sleep(0.15)
+        except Exception:
+            continue
+
+    print(f"  [국장] TOP {top_n} 중 신고가/근접 {len(rows)}개 발견", file=sys.stderr)
+    return pd.DataFrame(rows), end
+
+
+def grade_kr_high(r):
+    """국장 신고가 종목 등급 산정: S/A/B."""
+    score = 0
+    if r["closed_above"]:
+        score += 3      # 신고가 위 마감 (가장 강함)
+    elif r["broke"]:
+        score += 2      # 장중 돌파 후 되밀림
+    else:
+        score += 1      # 근접
+    if r["rank"] <= 20:
+        score += 2      # 거래대금 최상위
+    elif r["rank"] <= 50:
+        score += 1
+    if r["chg"] >= 5:
+        score += 2
+    elif r["chg"] >= 2:
+        score += 1
+    if score >= 6:
+        return "S"
+    if score >= 4:
+        return "A"
+    return "B"
+
+
+def generate_kr_highs_report(df, base_date):
+    """국장 거래대금 TOP100 x 52주 신고가 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    date_str = f"{base_date[:4]}-{base_date[4:6]}-{base_date[6:]}"
+    w("=" * 70)
+    w("  국장 신고가 스캔 (코스피 + 코스닥 전체)")
+    w(f"  {date_str} 장마감 기준")
+    w("  조건: 거래대금 TOP 100 AND 52주 신고가 갱신")
+    w("=" * 70)
+    w()
+
+    if df.empty:
+        w("  오늘은 거래대금 TOP 100 중 52주 신고가 종목이 없습니다.")
+        w()
+        return buf.getvalue()
+
+    df = df.copy()
+    df["grade"] = df.apply(grade_kr_high, axis=1)
+
+    new_highs = df[df["broke"]].sort_values(["grade", "rank"])
+    near = df[~df["broke"]].sort_values("pct_h", ascending=False)
+
+    w(f"  신고가 갱신: {len(new_highs)}개  |  신고가 근접(97%+): {len(near)}개")
+    for g in ["S", "A", "B"]:
+        cnt = len(new_highs[new_highs["grade"] == g])
+        if cnt:
+            w(f"    등급 {g}: {cnt}개")
+    w()
+
+    if not new_highs.empty:
+        for grade in ["S", "A", "B"]:
+            gdf = new_highs[new_highs["grade"] == grade]
+            if gdf.empty:
+                continue
+            grade_label = {"S": "최우선 관심", "A": "관심", "B": "모니터링"}[grade]
+            w("-" * 70)
+            w(f"  === 등급 {grade} ({grade_label}) ===")
+            w("-" * 70)
+            w()
+            for _, r in gdf.iterrows():
+                status = "신고가 마감!" if r["closed_above"] else "장중 신고가 후 되밀림"
+                w(f"  [{grade}] {r['name']} ({r['sym']})  -- {status}")
+                w(f"      종가: {r['price']:,.0f}원  |  등락: {r['chg']:+.2f}%  |  거래대금 {r['rank']}위 ({fmt_tv(r['tv'], 'KR')})")
+                w(f"      직전 52주 고가: {r['prior_high']:,.0f}원  |  고가 대비: {r['pct_h']:.1f}%")
+                comments = []
+                if r["closed_above"]:
+                    comments.append("신고가 위 마감 - 추세 지속 가능성")
+                else:
+                    comments.append("윗꼬리 - 내일 재돌파 확인 필요")
+                if r["rank"] <= 20:
+                    comments.append("수급 최상위 (시장 주도주)")
+                if r["chg"] >= 5:
+                    comments.append("강한 상승")
+                w(f"      -> {', '.join(comments)}")
+                w()
+
+    if not near.empty:
+        w("-" * 70)
+        w("  [신고가 근접] (52주 고가 대비 97% 이상, 돌파 대기)")
+        w("-" * 70)
+        w()
+        for _, r in near.iterrows():
+            w(f"  - {r['name']} ({r['sym']}): {r['price']:,.0f}원 ({r['chg']:+.2f}%)"
+              f"  고가대비 {r['pct_h']:.1f}%  |  거래대금 {r['rank']}위")
+        w()
+
+    w("-" * 70)
+    w("  주의: 본 보고서는 데이터 기반 자동 생성이며 투자 권유가 아닙니다.")
+    w("-" * 70)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_kr_highs(output=None):
+    """국장 거래대금 TOP100 신고가 스캔 실행. KRX 실패 시 yfinance 방식으로 대체."""
+    try:
+        df, base_date = scan_kr_new_highs(top_n=100)
+        report = generate_kr_highs_report(df, base_date)
+    except Exception as e:
+        print(f"  KRX 전체 스캔 실패 ({e}) -> yfinance 유니버스 방식으로 대체", file=sys.stderr)
+        dfs = [scan(KOSPI, "KR", 0), scan(KOSDAQ, "KR", 0)]
+        combined = pd.concat([d for d in dfs if not d.empty], ignore_index=True) if any(not d.empty for d in dfs) else pd.DataFrame()
+        report = generate_report(combined, pct_h_min=97, tv_top_pct=50, market="KR")
+
+    print(report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"kr_highs_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def run_report(market="ALL", output=None, chart=True):
     """보고서 실행."""
     jobs = []
@@ -1874,10 +2061,14 @@ def main():
                         help="미너비니 SEPA 피봇바이 스캔 (나스닥)")
     parser.add_argument("--longbase", action="store_true",
                         help="롱베이스 돌파 + 첫 HTF 스캔 (나스닥)")
+    parser.add_argument("--kr-highs", action="store_true",
+                        help="국장 거래대금 TOP100 x 52주 신고가 스캔 (전체 시장)")
     parser.add_argument("--no-chart", action="store_true",
                         help="차트 생성 비활성화")
     args = parser.parse_args()
-    if args.minervini:
+    if args.kr_highs:
+        run_kr_highs(output=args.output)
+    elif args.minervini:
         run_minervini(output=args.output)
     elif args.longbase:
         run_longbase(output=args.output)

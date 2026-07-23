@@ -42,23 +42,31 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance pandas matplotlib numpy lxml beautifulsoup4 html5lib
+        run: pip install yfinance pandas matplotlib numpy lxml beautifulsoup4 html5lib pykrx
 
       - name: Set email subject
         run: |
           if [ "${{ env.MARKET }}" = "KR" ]; then
-            echo "SUBJECT=[국장] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+            echo "SUBJECT=[국장] 거래대금 TOP100 신고가 - ${{ env.TODAY }}" >> $GITHUB_ENV
           elif [ "${{ env.MARKET }}" = "US" ]; then
             echo "SUBJECT=[미장] 신고가 + 미너비니 + 롱베이스 - ${{ env.TODAY }}" >> $GITHUB_ENV
           else
-            echo "SUBJECT=[투자] 52주 신고가 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
+            echo "SUBJECT=[투자] 종합 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
           fi
 
-      - name: Generate 52-week high report
+      - name: Generate KR new-highs report (KOSPI+KOSDAQ full market)
+        if: env.MARKET == 'KR' || env.MARKET == 'ALL'
         run: |
           mkdir -p reports
-          python3 stock_report.py --market ${{ env.MARKET }} --no-chart \
-            --output reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt
+          python3 stock_report.py --kr-highs \
+            --output reports/kr_highs_${{ env.TODAY }}.txt
+
+      - name: Generate 52-week high report (US)
+        if: env.MARKET == 'US' || env.MARKET == 'ALL'
+        run: |
+          mkdir -p reports
+          python3 stock_report.py --market US --no-chart \
+            --output reports/report_US_${{ env.TODAY }}.txt
 
       - name: Generate Minervini scan (US only)
         if: env.MARKET == 'US' || env.MARKET == 'ALL'
@@ -82,19 +90,17 @@ jobs:
 
       - name: Collect attachments
         run: |
-          FILES="reports/report_${{ env.MARKET }}_${{ env.TODAY }}.txt"
-          if [ -f "reports/minervini_${{ env.TODAY }}.txt" ]; then
-            FILES="$FILES,reports/minervini_${{ env.TODAY }}.txt"
-          fi
-          if [ -f "reports/longbase_${{ env.TODAY }}.txt" ]; then
-            FILES="$FILES,reports/longbase_${{ env.TODAY }}.txt"
-          fi
-          if [ -f "reports/stage2_${{ env.TODAY }}.txt" ]; then
-            FILES="$FILES,reports/stage2_${{ env.TODAY }}.txt"
-          fi
-          if [ -f "reports/stage2_${{ env.TODAY }}.png" ]; then
-            FILES="$FILES,reports/stage2_${{ env.TODAY }}.png"
-          fi
+          FILES=""
+          for f in reports/kr_highs_${{ env.TODAY }}.txt \
+                   reports/report_US_${{ env.TODAY }}.txt \
+                   reports/minervini_${{ env.TODAY }}.txt \
+                   reports/longbase_${{ env.TODAY }}.txt \
+                   reports/stage2_${{ env.TODAY }}.txt \
+                   reports/stage2_${{ env.TODAY }}.png; do
+            if [ -f "$f" ]; then
+              if [ -z "$FILES" ]; then FILES="$f"; else FILES="$FILES,$f"; fi
+            fi
+          done
           echo "ATTACHMENTS=$FILES" >> $GITHUB_ENV
 
       - name: Send email
