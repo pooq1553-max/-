@@ -1,10 +1,11 @@
 """Native desktop face-swap app (tkinter).
 
-Two tabs: 사진 스왑 and 동영상 스왑. No browser, no Gradio.
+Three tabs: 사진 스왑, 동영상 스왑, 동영상 다운로드. No browser, no Gradio.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -13,6 +14,7 @@ from tkinter import (
     Button,
     Canvas,
     Checkbutton,
+    Entry,
     Frame,
     Label,
     StringVar,
@@ -78,6 +80,15 @@ class FaceSwapApp:
         self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
         self.v_running = False
 
+        # download state
+        default_dl = Path.home() / "Downloads"
+        self.dl_url = StringVar(value="")
+        self.dl_folder = StringVar(value=str(default_dl))
+        self.dl_status = StringVar(value="URL 붙여넣고 다운로드 시작.")
+        self.dl_running = False
+        self.dl_last_file: str | None = None
+        self.dl_send_after = BooleanVar(value=True)
+
         self._build_ui()
 
     # ------------------------------------------------------------ UI --------
@@ -85,13 +96,17 @@ class FaceSwapApp:
         nb = ttk.Notebook(self.root)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
 
+        self.notebook = nb
         self.photo_tab = Frame(nb)
         self.video_tab = Frame(nb)
+        self.download_tab = Frame(nb)
         nb.add(self.photo_tab, text="  사진 스왑  ")
         nb.add(self.video_tab, text="  동영상 스왑  ")
+        nb.add(self.download_tab, text="  동영상 다운로드  ")
 
         self._build_photo_tab(self.photo_tab)
         self._build_video_tab(self.video_tab)
+        self._build_download_tab(self.download_tab)
 
         note = Label(
             self.root,
@@ -412,6 +427,182 @@ class FaceSwapApp:
         self.v_status.set(f"완료 · 소요 {m}분 {s}초 · 저장 위치: {self.v_output_path}")
         messagebox.showinfo("동영상 스왑 완료",
             f"저장됨:\n{self.v_output_path}\n\n소요 시간: {m}분 {s}초")
+
+    # ---------------------------------------------------------- download UI
+    def _build_download_tab(self, parent: Frame) -> None:
+        wrap = Frame(parent, padx=16, pady=16)
+        wrap.pack(fill="both", expand=True)
+
+        Label(wrap, text="동영상 URL", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, text="X(Twitter), YouTube, Instagram, TikTok 등 대부분 지원",
+              fg="#666", font=("Segoe UI", 9)).pack(anchor="w")
+        url_row = Frame(wrap)
+        url_row.pack(fill="x", pady=(4, 8))
+        entry = Entry(url_row, textvariable=self.dl_url, font=("Segoe UI", 11))
+        entry.pack(side="left", fill="x", expand=True, ipady=4)
+        Button(url_row, text="클립보드에서 붙여넣기", command=self._dl_paste, padx=8).pack(side="left", padx=(6, 0))
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="저장 폴더", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        folder_row = Frame(wrap)
+        folder_row.pack(fill="x", pady=(4, 8))
+        Entry(folder_row, textvariable=self.dl_folder, state="readonly", font=("Segoe UI", 10)).pack(
+            side="left", fill="x", expand=True, ipady=4
+        )
+        Button(folder_row, text="폴더 선택...", command=self._dl_pick_folder, padx=8).pack(side="left", padx=(6, 0))
+
+        Label(wrap, text="").pack()
+        Checkbutton(
+            wrap,
+            text="다운로드 완료 후 자동으로 '동영상 스왑' 탭에 이 파일 설정",
+            variable=self.dl_send_after,
+        ).pack(anchor="w")
+
+        btns = Frame(wrap)
+        btns.pack(pady=(12, 4))
+        self.dl_start_btn = Button(
+            btns, text="다운로드 시작", command=self._run_download,
+            font=("Segoe UI", 13, "bold"),
+            bg="#6a1b9a", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#4a0072", activeforeground="white",
+        )
+        self.dl_start_btn.pack(side="left", padx=4)
+        self.dl_open_btn = Button(
+            btns, text="저장 폴더 열기", command=self._dl_open_folder, padx=16, pady=8,
+        )
+        self.dl_open_btn.pack(side="left", padx=4)
+
+        self.dl_progress = ttk.Progressbar(wrap, mode="determinate", length=520, maximum=100)
+        self.dl_progress.pack(pady=6, fill="x")
+        Label(wrap, textvariable=self.dl_status, fg="#555", wraplength=800, justify="left").pack(anchor="w", pady=(2, 8))
+
+    def _dl_paste(self) -> None:
+        try:
+            text = self.root.clipboard_get().strip()
+            if text:
+                self.dl_url.set(text)
+        except Exception:
+            messagebox.showinfo("붙여넣기", "클립보드에 텍스트가 없어요.")
+
+    def _dl_pick_folder(self) -> None:
+        path = filedialog.askdirectory(title="저장 폴더 선택", initialdir=self.dl_folder.get())
+        if path:
+            self.dl_folder.set(path)
+
+    def _dl_open_folder(self) -> None:
+        folder = self.dl_folder.get()
+        if folder and Path(folder).exists():
+            try:
+                os.startfile(folder)
+            except Exception:
+                messagebox.showinfo("폴더", folder)
+
+    def _run_download(self) -> None:
+        if self.dl_running:
+            return
+        url = self.dl_url.get().strip()
+        folder = self.dl_folder.get().strip()
+        if not url:
+            messagebox.showwarning("URL 필요", "동영상 URL을 붙여넣으세요.")
+            return
+        if not folder:
+            messagebox.showwarning("폴더 필요", "저장 폴더를 지정하세요.")
+            return
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        self.dl_running = True
+        self.dl_start_btn.config(state="disabled", text="다운로드 중...")
+        self.dl_progress.config(value=0)
+        self.dl_status.set("시작 중...")
+        threading.Thread(target=self._dl_worker, args=(url, folder), daemon=True).start()
+
+    def _dl_worker(self, url: str, folder: str) -> None:
+        try:
+            try:
+                import yt_dlp
+            except ImportError:
+                raise RuntimeError(
+                    "yt-dlp가 설치되지 않았어요. PowerShell에서 다음을 실행:\n"
+                    "  pip install yt-dlp"
+                )
+
+            def hook(d):
+                status = d.get("status")
+                if status == "downloading":
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+                    done = d.get("downloaded_bytes", 0)
+                    speed = d.get("speed") or 0
+                    eta = d.get("eta") or 0
+                    pct = (done / total * 100) if total else 0
+                    speed_mb = speed / (1024 * 1024) if speed else 0
+                    msg = (
+                        f"다운로드 중 · {done / 1e6:.1f} / "
+                        f"{total / 1e6:.1f} MB · {speed_mb:.1f} MB/s · 남은 {eta}s"
+                    )
+                    self.root.after(0, lambda: (self.dl_progress.config(value=pct),
+                                                self.dl_status.set(msg)))
+                elif status == "finished":
+                    self.dl_last_file = d.get("filename")
+                    self.root.after(0, lambda: self.dl_status.set("병합/변환 중..."))
+
+            ydl_opts = {
+                "outtmpl": str(Path(folder) / "%(title).100B [%(id)s].%(ext)s"),
+                "format": "bv*+ba/b",
+                "merge_output_format": "mp4",
+                "restrictfilenames": True,
+                "noplaylist": True,
+                "progress_hooks": [hook],
+                "quiet": True,
+                "no_warnings": True,
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filepath = ydl.prepare_filename(info)
+                if not Path(filepath).exists():
+                    for ext in ("mp4", "mkv", "webm"):
+                        cand = Path(filepath).with_suffix(f".{ext}")
+                        if cand.exists():
+                            filepath = str(cand)
+                            break
+                self.dl_last_file = filepath
+
+            self.root.after(0, self._on_dl_done, filepath, None)
+        except Exception as e:
+            self.root.after(0, self._on_dl_done, None, str(e))
+
+    def _on_dl_done(self, filepath, error) -> None:
+        self.dl_running = False
+        self.dl_start_btn.config(state="normal", text="다운로드 시작")
+        if error:
+            self.dl_progress.config(value=0)
+            self.dl_status.set("에러 발생")
+            messagebox.showerror("다운로드 실패", error)
+            return
+        self.dl_progress.config(value=100)
+        self.dl_status.set(f"완료: {filepath}")
+        if self.dl_send_after.get() and filepath:
+            self._send_to_video_swap(filepath)
+        else:
+            messagebox.showinfo("다운로드 완료", f"저장됨:\n{filepath}")
+
+    def _send_to_video_swap(self, video_path: str) -> None:
+        try:
+            info = probe_video(video_path)
+            dur = info["duration_sec"]
+            m, s = divmod(int(dur), 60)
+            self.v_target_info.set(
+                f"{Path(video_path).name}\n"
+                f"{info['width']}x{info['height']} · {info['fps']:.1f} fps · "
+                f"{info['frames']} frames · {m}:{s:02d}"
+            )
+            self.v_target_path = video_path
+            self.notebook.select(self.video_tab)
+            messagebox.showinfo(
+                "다운로드 완료",
+                f"동영상이 '동영상 스왑' 탭에 설정됐어요.\n소스 사진과 저장 경로만 지정하고 스왑을 시작하세요.",
+            )
+        except Exception:
+            messagebox.showinfo("다운로드 완료", f"저장됨:\n{video_path}")
 
     def run(self) -> None:
         self.root.mainloop()
