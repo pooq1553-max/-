@@ -522,8 +522,16 @@ class FaceSwapApp:
             except ImportError:
                 raise RuntimeError(
                     "yt-dlp가 설치되지 않았어요. PowerShell에서 다음을 실행:\n"
-                    "  pip install yt-dlp"
+                    "  .\\.venv\\Scripts\\python.exe -m pip install yt-dlp"
                 )
+
+            import shutil
+            ffmpeg_path = None
+            try:
+                import imageio_ffmpeg
+                ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception:
+                ffmpeg_path = shutil.which("ffmpeg")
 
             def hook(d):
                 status = d.get("status")
@@ -546,7 +554,7 @@ class FaceSwapApp:
 
             ydl_opts = {
                 "outtmpl": str(Path(folder) / "%(title).100B [%(id)s].%(ext)s"),
-                "format": "bv*+ba/b",
+                "format": "bv*+ba/b" if ffmpeg_path else "b[ext=mp4]/b",
                 "merge_output_format": "mp4",
                 "restrictfilenames": True,
                 "noplaylist": True,
@@ -554,6 +562,8 @@ class FaceSwapApp:
                 "quiet": True,
                 "no_warnings": True,
             }
+            if ffmpeg_path:
+                ydl_opts["ffmpeg_location"] = ffmpeg_path
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
