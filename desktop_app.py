@@ -29,7 +29,28 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from faceswap.pipeline import FaceSwapPipeline
-from faceswap.video import probe_video, swap_video
+from faceswap.video import probe_video, swap_video, trim_video
+
+
+def _parse_time(text: str) -> float:
+    text = text.strip()
+    if not text:
+        raise ValueError("시간이 비어있어요")
+    if ":" in text:
+        parts = [float(p) for p in text.split(":")]
+        if len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        raise ValueError("시간 형식이 이상해요")
+    return float(text)
+
+
+def _format_time(sec: float) -> str:
+    sec = max(0.0, sec)
+    m = int(sec // 60)
+    s = sec - m * 60
+    return f"{m}:{s:05.2f}"
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "inswapper_128.onnx"
 THUMB = 300
@@ -89,6 +110,18 @@ class FaceSwapApp:
         self.dl_last_file: str | None = None
         self.dl_send_after = BooleanVar(value=True)
 
+        # trim state
+        self.tr_input_path: str | None = None
+        self.tr_output_path: str | None = None
+        self.tr_input_info = StringVar(value="선택된 동영상 없음")
+        self.tr_output_info = StringVar(value="선택된 저장 경로 없음")
+        self.tr_start = StringVar(value="0:00")
+        self.tr_end = StringVar(value="0:10")
+        self.tr_reencode = BooleanVar(value=False)
+        self.tr_send_after = BooleanVar(value=True)
+        self.tr_status = StringVar(value="동영상 선택 → 시작/끝 시간 입력 → 자르기.")
+        self.tr_duration_sec = 0.0
+
         self._build_ui()
 
     # ------------------------------------------------------------ UI --------
@@ -100,13 +133,16 @@ class FaceSwapApp:
         self.photo_tab = Frame(nb)
         self.video_tab = Frame(nb)
         self.download_tab = Frame(nb)
+        self.trim_tab = Frame(nb)
         nb.add(self.photo_tab, text="  사진 스왑  ")
         nb.add(self.video_tab, text="  동영상 스왑  ")
         nb.add(self.download_tab, text="  동영상 다운로드  ")
+        nb.add(self.trim_tab, text="  동영상 자르기  ")
 
         self._build_photo_tab(self.photo_tab)
         self._build_video_tab(self.video_tab)
         self._build_download_tab(self.download_tab)
+        self._build_trim_tab(self.trim_tab)
 
         note = Label(
             self.root,
@@ -613,6 +649,165 @@ class FaceSwapApp:
             )
         except Exception:
             messagebox.showinfo("다운로드 완료", f"저장됨:\n{video_path}")
+
+    # -------------------------------------------------------------- trim UI
+    def _build_trim_tab(self, parent: Frame) -> None:
+        wrap = Frame(parent, padx=16, pady=16)
+        wrap.pack(fill="both", expand=True)
+
+        Label(wrap, text="원본 동영상", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.tr_input_info, fg="#333", wraplength=800, justify="left").pack(anchor="w", pady=4)
+        Button(wrap, text="동영상 선택...", command=self._tr_pick_input, padx=10, pady=4).pack(anchor="w")
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="자를 구간 (초 또는 분:초 형식, 예: 30 · 1:15 · 0:30)",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+
+        row = Frame(wrap)
+        row.pack(fill="x", pady=(6, 0))
+        Label(row, text="시작:").pack(side="left")
+        Entry(row, textvariable=self.tr_start, font=("Segoe UI", 11), width=10).pack(side="left", padx=(4, 12))
+        Label(row, text="끝:").pack(side="left")
+        Entry(row, textvariable=self.tr_end, font=("Segoe UI", 11), width=10).pack(side="left", padx=(4, 12))
+        self.tr_len_lbl = Label(row, text="", fg="#666")
+        self.tr_len_lbl.pack(side="left")
+        self.tr_start.trace_add("write", lambda *_: self._tr_update_length())
+        self.tr_end.trace_add("write", lambda *_: self._tr_update_length())
+
+        Checkbutton(
+            wrap,
+            text="정확한 구간 자르기 (재인코딩, 느림. 끄면 빠르지만 시작 시점이 최대 몇 초 어긋날 수 있음)",
+            variable=self.tr_reencode,
+        ).pack(anchor="w", pady=(8, 0))
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="저장 경로", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.tr_output_info, fg="#333", wraplength=800, justify="left").pack(anchor="w", pady=4)
+        Button(wrap, text="저장 위치 지정...", command=self._tr_pick_output, padx=10, pady=4).pack(anchor="w")
+
+        Checkbutton(
+            wrap,
+            text="자르기 완료 후 자동으로 '동영상 스왑' 탭에 이 파일 설정",
+            variable=self.tr_send_after,
+        ).pack(anchor="w", pady=(8, 0))
+
+        btns = Frame(wrap)
+        btns.pack(pady=(12, 4))
+        self.tr_start_btn = Button(
+            btns, text="자르기 시작", command=self._run_trim,
+            font=("Segoe UI", 13, "bold"),
+            bg="#ef6c00", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#c25400", activeforeground="white",
+        )
+        self.tr_start_btn.pack(side="left", padx=4)
+
+        self.tr_progress = ttk.Progressbar(wrap, mode="indeterminate", length=520)
+        self.tr_progress.pack(pady=6, fill="x")
+        Label(wrap, textvariable=self.tr_status, fg="#555", wraplength=800, justify="left").pack(anchor="w", pady=(2, 8))
+
+    def _tr_pick_input(self) -> None:
+        path = filedialog.askopenfilename(
+            title="원본 동영상 선택",
+            filetypes=[("동영상", "*.mp4 *.mov *.avi *.mkv *.webm"), ("모든 파일", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            info = probe_video(path)
+        except Exception as e:
+            messagebox.showerror("동영상 오류", str(e))
+            return
+        dur = info["duration_sec"]
+        self.tr_duration_sec = dur
+        m, s = divmod(int(dur), 60)
+        self.tr_input_info.set(
+            f"{Path(path).name}\n"
+            f"{info['width']}x{info['height']} · {info['fps']:.1f} fps · {m}:{s:02d}"
+        )
+        self.tr_input_path = path
+        self.tr_end.set(_format_time(min(dur, 10.0)))
+        self._tr_update_length()
+
+    def _tr_pick_output(self) -> None:
+        base = "trimmed.mp4"
+        if self.tr_input_path:
+            p = Path(self.tr_input_path)
+            base = f"{p.stem}_trimmed.mp4"
+        path = filedialog.asksaveasfilename(
+            title="자른 동영상 저장 경로",
+            defaultextension=".mp4",
+            filetypes=[("MP4", "*.mp4")],
+            initialfile=base,
+        )
+        if path:
+            self.tr_output_path = path
+            self.tr_output_info.set(path)
+
+    def _tr_update_length(self) -> None:
+        try:
+            start = _parse_time(self.tr_start.get())
+            end = _parse_time(self.tr_end.get())
+            length = end - start
+            if length > 0:
+                self.tr_len_lbl.config(text=f"→ 길이 {length:.1f}초", fg="#333")
+            else:
+                self.tr_len_lbl.config(text="(끝이 시작보다 뒤여야 함)", fg="#c00")
+        except Exception:
+            self.tr_len_lbl.config(text="", fg="#666")
+
+    def _run_trim(self) -> None:
+        if not self.tr_input_path:
+            messagebox.showwarning("동영상 필요", "원본 동영상을 먼저 선택하세요.")
+            return
+        if not self.tr_output_path:
+            messagebox.showwarning("저장 경로 필요", "저장 위치를 지정하세요.")
+            return
+        try:
+            start = _parse_time(self.tr_start.get())
+            end = _parse_time(self.tr_end.get())
+        except Exception:
+            messagebox.showwarning("시간 형식", "시작/끝 시간을 숫자(초) 또는 분:초 형식으로 입력하세요.")
+            return
+        if end <= start:
+            messagebox.showwarning("시간 오류", "끝 시간이 시작 시간보다 뒤여야 해요.")
+            return
+        if self.tr_duration_sec and end > self.tr_duration_sec + 0.5:
+            if not messagebox.askokcancel(
+                "확인",
+                f"끝 시간({end:.1f}s)이 원본 길이({self.tr_duration_sec:.1f}s)보다 커요.\n계속 진행할까요?",
+            ):
+                return
+
+        self.tr_start_btn.config(state="disabled", text="자르는 중...")
+        self.tr_progress.start(10)
+        self.tr_status.set("ffmpeg으로 자르는 중...")
+        threading.Thread(target=self._tr_worker, args=(start, end), daemon=True).start()
+
+    def _tr_worker(self, start: float, end: float) -> None:
+        try:
+            trim_video(
+                input_path=self.tr_input_path,
+                output_path=self.tr_output_path,
+                start_sec=start,
+                end_sec=end,
+                reencode=self.tr_reencode.get(),
+            )
+            self.root.after(0, self._on_trim_done, None)
+        except Exception as e:
+            self.root.after(0, self._on_trim_done, str(e))
+
+    def _on_trim_done(self, error) -> None:
+        self.tr_progress.stop()
+        self.tr_start_btn.config(state="normal", text="자르기 시작")
+        if error:
+            self.tr_status.set("에러 발생")
+            messagebox.showerror("자르기 실패", error)
+            return
+        self.tr_status.set(f"완료: {self.tr_output_path}")
+        if self.tr_send_after.get() and self.tr_output_path:
+            self._send_to_video_swap(self.tr_output_path)
+        else:
+            messagebox.showinfo("자르기 완료", f"저장됨:\n{self.tr_output_path}")
 
     def run(self) -> None:
         self.root.mainloop()

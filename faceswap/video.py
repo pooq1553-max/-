@@ -34,6 +34,59 @@ def _ffmpeg_exe() -> Optional[str]:
         return shutil.which("ffmpeg")
 
 
+def trim_video(
+    input_path: str | Path,
+    output_path: str | Path,
+    start_sec: float,
+    end_sec: float,
+    reencode: bool = False,
+) -> Path:
+    """Cut [start_sec, end_sec] from input_path into output_path using ffmpeg.
+
+    Stream-copy mode is fast but aligned to the nearest keyframe; reencode
+    mode is frame-accurate but slower.
+    """
+    if end_sec <= start_sec:
+        raise ValueError("끝 시간이 시작 시간보다 뒤여야 해요.")
+    ffmpeg = _ffmpeg_exe()
+    if not ffmpeg:
+        raise RuntimeError(
+            "ffmpeg을 찾을 수 없어요. PowerShell에서 다음을 실행:\n"
+            "  .\\.venv\\Scripts\\python.exe -m pip install imageio-ffmpeg"
+        )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    duration = end_sec - start_sec
+    if reencode:
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{start_sec:.3f}",
+            "-i", str(input_path),
+            "-t", f"{duration:.3f}",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-c:a", "aac",
+            str(output_path),
+        ]
+    else:
+        cmd = [
+            ffmpeg, "-y",
+            "-ss", f"{start_sec:.3f}",
+            "-i", str(input_path),
+            "-t", f"{duration:.3f}",
+            "-c", "copy",
+            "-avoid_negative_ts", "make_zero",
+            str(output_path),
+        ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "ffmpeg 실행 실패:\n" + result.stderr.decode("utf-8", errors="replace")[-800:]
+        )
+    return output_path
+
+
 def probe_video(path: str | Path) -> dict:
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
