@@ -109,6 +109,7 @@ class FaceSwapApp:
         self.dl_running = False
         self.dl_last_file: str | None = None
         self.dl_send_after = BooleanVar(value=True)
+        self.dl_browser = StringVar(value="없음")
 
         # trim state
         self.tr_input_path: str | None = None
@@ -488,6 +489,19 @@ class FaceSwapApp:
         Button(folder_row, text="폴더 선택...", command=self._dl_pick_folder, padx=8).pack(side="left", padx=(6, 0))
 
         Label(wrap, text="").pack()
+        Label(wrap, text="로그인 필요한 트윗일 때만 사용 (브라우저에 X 로그인 되어 있어야 함)",
+              font=("Segoe UI", 9), fg="#666").pack(anchor="w")
+        browser_row = Frame(wrap)
+        browser_row.pack(fill="x", pady=(2, 8))
+        Label(browser_row, text="브라우저 쿠키:").pack(side="left")
+        ttk.Combobox(
+            browser_row,
+            textvariable=self.dl_browser,
+            values=["없음", "chrome", "edge", "firefox", "brave", "opera", "vivaldi"],
+            state="readonly",
+            width=12,
+        ).pack(side="left", padx=(6, 0))
+
         Checkbutton(
             wrap,
             text="다운로드 완료 후 자동으로 '동영상 스왑' 탭에 이 파일 설정",
@@ -597,9 +611,14 @@ class FaceSwapApp:
                 "progress_hooks": [hook],
                 "quiet": True,
                 "no_warnings": True,
+                "color": "no_color",
             }
             if ffmpeg_path:
                 ydl_opts["ffmpeg_location"] = ffmpeg_path
+
+            browser = self.dl_browser.get()
+            if browser and browser != "없음":
+                ydl_opts["cookiesfrombrowser"] = (browser,)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -622,7 +641,17 @@ class FaceSwapApp:
         if error:
             self.dl_progress.config(value=0)
             self.dl_status.set("에러 발생")
-            messagebox.showerror("다운로드 실패", error)
+            import re as _re
+            clean = _re.sub(r"\x1b\[[0-9;]*m", "", error)
+            hint = ""
+            low = clean.lower()
+            if "no video could be found" in low or "unavailable" in low or "requires login" in low or "not authorized" in low:
+                hint = (
+                    "\n\n힌트:\n"
+                    "• yt-dlp를 최신으로: pip install -U yt-dlp\n"
+                    "• 로그인 필요한 트윗이면 위 '브라우저 쿠키' 드롭다운에서 로그인된 브라우저(chrome/edge 등) 선택 후 재시도"
+                )
+            messagebox.showerror("다운로드 실패", clean + hint)
             return
         self.dl_progress.config(value=100)
         self.dl_status.set(f"완료: {filepath}")
