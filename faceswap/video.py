@@ -87,6 +87,88 @@ def trim_video(
     return output_path
 
 
+def concat_videos(
+    input_paths: list[str | Path],
+    output_path: str | Path,
+    reencode: bool = False,
+) -> Path:
+    """Concatenate multiple videos into output_path.
+
+    Fast mode uses the concat demuxer with `-c copy` (all inputs must share
+    codec / resolution / fps / audio params). Re-encode mode uses the concat
+    filter with libx264+aac and handles mixed inputs.
+    """
+    if not input_paths:
+        raise ValueError("합칠 동영상이 없어요.")
+    if len(input_paths) < 2:
+        raise ValueError("두 개 이상의 동영상이 필요해요.")
+    ffmpeg = _ffmpeg_exe()
+    if not ffmpeg:
+        raise RuntimeError(
+            "ffmpeg을 찾을 수 없어요. PowerShell에서:\n"
+            "  .\\.venv\\Scripts\\python.exe -m pip install imageio-ffmpeg"
+        )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    inputs = [Path(p).resolve() for p in input_paths]
+    for p in inputs:
+        if not p.exists():
+            raise FileNotFoundError(f"파일이 없어요: {p}")
+
+    if not reencode:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as tf:
+            listfile = Path(tf.name)
+            for p in inputs:
+                escaped = str(p).replace("'", r"'\''")
+                tf.write(f"file '{escaped}'\n")
+        try:
+            cmd = [
+                ffmpeg, "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(listfile),
+                "-c", "copy",
+                str(output_path),
+            ]
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode != 0:
+                raise RuntimeError(
+                    "빠른 합치기 실패. 동영상들의 해상도/코덱/fps가 서로 달라서일 가능성 큼.\n"
+                    "'화질 강제 통일' 옵션을 켜고 다시 시도하세요.\n\n"
+                    + result.stderr.decode("utf-8", errors="replace")[-600:]
+                )
+        finally:
+            try:
+                listfile.unlink()
+            except Exception:
+                pass
+    else:
+        cmd = [ffmpeg, "-y"]
+        for p in inputs:
+            cmd += ["-i", str(p)]
+        n = len(inputs)
+        streams = "".join(f"[{i}:v:0][{i}:a:0?]" for i in range(n))
+        filter_expr = f"{streams}concat=n={n}:v=1:a=1[v][a]"
+        cmd += [
+            "-filter_complex", filter_expr,
+            "-map", "[v]",
+            "-map", "[a]",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-c:a", "aac",
+            str(output_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "재인코딩 합치기 실패:\n"
+                + result.stderr.decode("utf-8", errors="replace")[-800:]
+            )
+
+    return output_path
+
+
 def probe_video(path: str | Path) -> dict:
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():

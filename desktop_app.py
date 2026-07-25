@@ -28,8 +28,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
+from tkinter import Listbox, END
+
 from faceswap.pipeline import FaceSwapPipeline
-from faceswap.video import probe_video, swap_video, trim_video
+from faceswap.video import concat_videos, probe_video, swap_video, trim_video
 
 
 def _parse_time(text: str) -> float:
@@ -111,6 +113,14 @@ class FaceSwapApp:
         self.dl_send_after = BooleanVar(value=True)
         self.dl_browser = StringVar(value="없음")
 
+        # merge state
+        self.mg_files: list[str] = []
+        self.mg_output_path: str | None = None
+        self.mg_output_info = StringVar(value="선택된 저장 경로 없음")
+        self.mg_reencode = BooleanVar(value=False)
+        self.mg_send_after = BooleanVar(value=True)
+        self.mg_status = StringVar(value="합칠 동영상들을 추가 → 순서 정하기 → 합치기.")
+
         # trim state
         self.tr_input_path: str | None = None
         self.tr_output_path: str | None = None
@@ -135,15 +145,18 @@ class FaceSwapApp:
         self.video_tab = Frame(nb)
         self.download_tab = Frame(nb)
         self.trim_tab = Frame(nb)
+        self.merge_tab = Frame(nb)
         nb.add(self.photo_tab, text="  사진 스왑  ")
         nb.add(self.video_tab, text="  동영상 스왑  ")
         nb.add(self.download_tab, text="  동영상 다운로드  ")
         nb.add(self.trim_tab, text="  동영상 자르기  ")
+        nb.add(self.merge_tab, text="  동영상 합치기  ")
 
         self._build_photo_tab(self.photo_tab)
         self._build_video_tab(self.video_tab)
         self._build_download_tab(self.download_tab)
         self._build_trim_tab(self.trim_tab)
+        self._build_merge_tab(self.merge_tab)
 
         note = Label(
             self.root,
@@ -837,6 +850,145 @@ class FaceSwapApp:
             self._send_to_video_swap(self.tr_output_path)
         else:
             messagebox.showinfo("자르기 완료", f"저장됨:\n{self.tr_output_path}")
+
+    # ------------------------------------------------------------- merge UI
+    def _build_merge_tab(self, parent: Frame) -> None:
+        wrap = Frame(parent, padx=16, pady=16)
+        wrap.pack(fill="both", expand=True)
+
+        Label(wrap, text="합칠 동영상 (위에서 아래 순서로 이어붙음)",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+
+        list_frame = Frame(wrap)
+        list_frame.pack(fill="both", expand=True, pady=(6, 6))
+        self.mg_listbox = Listbox(list_frame, height=8, font=("Segoe UI", 10), activestyle="dotbox")
+        self.mg_listbox.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(list_frame, orient="vertical", command=self.mg_listbox.yview)
+        sb.pack(side="right", fill="y")
+        self.mg_listbox.config(yscrollcommand=sb.set)
+
+        btn_row = Frame(wrap)
+        btn_row.pack(fill="x", pady=(0, 6))
+        Button(btn_row, text="+ 추가", command=self._mg_add, padx=8).pack(side="left")
+        Button(btn_row, text="선택 제거", command=self._mg_remove, padx=8).pack(side="left", padx=(6, 0))
+        Button(btn_row, text="↑ 위로", command=lambda: self._mg_move(-1), padx=8).pack(side="left", padx=(6, 0))
+        Button(btn_row, text="↓ 아래로", command=lambda: self._mg_move(1), padx=8).pack(side="left", padx=(6, 0))
+        Button(btn_row, text="모두 지우기", command=self._mg_clear, padx=8).pack(side="left", padx=(6, 0))
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="저장 경로", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.mg_output_info, fg="#333", wraplength=800, justify="left").pack(anchor="w", pady=4)
+        Button(wrap, text="저장 위치 지정...", command=self._mg_pick_output, padx=10, pady=4).pack(anchor="w")
+
+        Checkbutton(
+            wrap,
+            text="화질 강제 통일 (재인코딩, 느림. 해상도/코덱/fps가 다른 영상 합칠 때 필요)",
+            variable=self.mg_reencode,
+        ).pack(anchor="w", pady=(8, 0))
+        Checkbutton(
+            wrap,
+            text="합치기 완료 후 자동으로 '동영상 스왑' 탭에 이 파일 설정",
+            variable=self.mg_send_after,
+        ).pack(anchor="w")
+
+        btns = Frame(wrap)
+        btns.pack(pady=(12, 4))
+        self.mg_start_btn = Button(
+            btns, text="합치기 시작", command=self._run_merge,
+            font=("Segoe UI", 13, "bold"),
+            bg="#00838f", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#005f6b", activeforeground="white",
+        )
+        self.mg_start_btn.pack(side="left", padx=4)
+
+        self.mg_progress = ttk.Progressbar(wrap, mode="indeterminate", length=520)
+        self.mg_progress.pack(pady=6, fill="x")
+        Label(wrap, textvariable=self.mg_status, fg="#555", wraplength=800, justify="left").pack(anchor="w", pady=(2, 8))
+
+    def _mg_add(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="합칠 동영상 선택 (여러 개 가능)",
+            filetypes=[("동영상", "*.mp4 *.mov *.avi *.mkv *.webm"), ("모든 파일", "*.*")],
+        )
+        for p in paths:
+            self.mg_files.append(p)
+            self.mg_listbox.insert(END, f"{len(self.mg_files)}. {Path(p).name}   ·   {p}")
+        self._mg_refresh()
+
+    def _mg_remove(self) -> None:
+        sel = list(self.mg_listbox.curselection())
+        for i in reversed(sel):
+            del self.mg_files[i]
+        self._mg_refresh()
+
+    def _mg_move(self, delta: int) -> None:
+        sel = self.mg_listbox.curselection()
+        if not sel:
+            return
+        i = sel[0]
+        j = i + delta
+        if j < 0 or j >= len(self.mg_files):
+            return
+        self.mg_files[i], self.mg_files[j] = self.mg_files[j], self.mg_files[i]
+        self._mg_refresh()
+        self.mg_listbox.selection_set(j)
+
+    def _mg_clear(self) -> None:
+        self.mg_files.clear()
+        self._mg_refresh()
+
+    def _mg_refresh(self) -> None:
+        self.mg_listbox.delete(0, END)
+        for i, p in enumerate(self.mg_files, 1):
+            self.mg_listbox.insert(END, f"{i}. {Path(p).name}   ·   {p}")
+
+    def _mg_pick_output(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="합쳐진 동영상 저장 경로",
+            defaultextension=".mp4",
+            filetypes=[("MP4", "*.mp4")],
+            initialfile="merged.mp4",
+        )
+        if path:
+            self.mg_output_path = path
+            self.mg_output_info.set(path)
+
+    def _run_merge(self) -> None:
+        if len(self.mg_files) < 2:
+            messagebox.showwarning("파일 부족", "두 개 이상의 동영상을 추가하세요.")
+            return
+        if not self.mg_output_path:
+            messagebox.showwarning("저장 경로 필요", "저장 위치를 지정하세요.")
+            return
+        self.mg_start_btn.config(state="disabled", text="합치는 중...")
+        self.mg_progress.start(10)
+        mode = "재인코딩" if self.mg_reencode.get() else "빠른 합치기"
+        self.mg_status.set(f"{mode} 진행 중... ({len(self.mg_files)}개 파일)")
+        threading.Thread(target=self._mg_worker, daemon=True).start()
+
+    def _mg_worker(self) -> None:
+        try:
+            concat_videos(
+                input_paths=self.mg_files,
+                output_path=self.mg_output_path,
+                reencode=self.mg_reencode.get(),
+            )
+            self.root.after(0, self._on_merge_done, None)
+        except Exception as e:
+            self.root.after(0, self._on_merge_done, str(e))
+
+    def _on_merge_done(self, error) -> None:
+        self.mg_progress.stop()
+        self.mg_start_btn.config(state="normal", text="합치기 시작")
+        if error:
+            self.mg_status.set("에러 발생")
+            messagebox.showerror("합치기 실패", error)
+            return
+        self.mg_status.set(f"완료: {self.mg_output_path}")
+        if self.mg_send_after.get() and self.mg_output_path:
+            self._send_to_video_swap(self.mg_output_path)
+        else:
+            messagebox.showinfo("합치기 완료", f"저장됨:\n{self.mg_output_path}")
 
     def run(self) -> None:
         self.root.mainloop()
