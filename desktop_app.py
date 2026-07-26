@@ -102,6 +102,7 @@ class FaceSwapApp:
         self.v_output_info = StringVar(value="선택된 저장 경로 없음")
         self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
         self.v_running = False
+        self.v_resolution = StringVar(value="원본 유지")
 
         # download state
         default_dl = Path.home() / "Downloads"
@@ -234,6 +235,22 @@ class FaceSwapApp:
             ctrl,
             text="영상 속 모든 얼굴 교체 (기본: 프레임마다 가장 큰 얼굴만)",
             variable=self.v_replace_all,
+        ).pack(side="left")
+
+        res_row = Frame(parent, padx=8, pady=(0, 4))
+        res_row.pack(fill="x")
+        Label(res_row, text="처리 해상도:").pack(side="left")
+        ttk.Combobox(
+            res_row,
+            textvariable=self.v_resolution,
+            values=["원본 유지", "720p (2배 빠름)", "540p (3~4배 빠름)", "480p (5배 빠름)"],
+            state="readonly",
+            width=22,
+        ).pack(side="left", padx=(6, 0))
+        Label(
+            res_row,
+            text="  결과 영상이 선택한 해상도로 저장됨. 낮을수록 빠르고 파일 작지만 화질 손해.",
+            fg="#666", font=("Segoe UI", 9),
         ).pack(side="left")
 
         btns = Frame(parent)
@@ -449,12 +466,16 @@ class FaceSwapApp:
         start = time.time()
         try:
             pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.v_status.set, s))
+            res_map = {"원본 유지": None, "720p (2배 빠름)": 720,
+                       "540p (3~4배 빠름)": 540, "480p (5배 빠름)": 480}
+            resize_height = res_map.get(self.v_resolution.get())
             swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,
                 target_video_path=self.v_target_path,
                 output_video_path=self.v_output_path,
                 replace_all=self.v_replace_all.get(),
+                resize_height=resize_height,
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,
             )

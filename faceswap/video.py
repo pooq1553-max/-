@@ -193,6 +193,7 @@ def swap_video(
     target_video_path: str | Path,
     output_video_path: str | Path,
     replace_all: bool = False,
+    resize_height: Optional[int] = None,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Path:
@@ -208,8 +209,17 @@ def swap_video(
 
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    src_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    if resize_height and resize_height > 0 and resize_height < src_height:
+        out_height = resize_height
+        out_width = int(round(src_width * (out_height / src_height)))
+        if out_width % 2 == 1:
+            out_width += 1
+    else:
+        out_height = src_height
+        out_width = src_width
 
     output_video_path = Path(output_video_path)
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,12 +227,13 @@ def swap_video(
     with tempfile.TemporaryDirectory(prefix="faceswap_") as td:
         tmp_video = Path(td) / "video_no_audio.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(tmp_video), fourcc, fps, (width, height))
+        writer = cv2.VideoWriter(str(tmp_video), fourcc, fps, (out_width, out_height))
         if not writer.isOpened():
             cap.release()
             raise IOError("VideoWriter 초기화 실패")
 
         frame_idx = 0
+        need_resize = (out_width, out_height) != (src_width, src_height)
         try:
             while True:
                 if cancel and cancel():
@@ -233,6 +244,9 @@ def swap_video(
                 ret, frame = cap.read()
                 if not ret:
                     break
+
+                if need_resize:
+                    frame = cv2.resize(frame, (out_width, out_height), interpolation=cv2.INTER_AREA)
 
                 tgt_faces = pipeline.detector.detect(frame)
                 if tgt_faces:
