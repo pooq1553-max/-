@@ -32,6 +32,7 @@ from tkinter import Listbox, END
 
 from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import concat_videos, probe_video, swap_video, trim_video
+from faceswap.highlights import find_highlights, extract_highlight_clips
 
 
 def _parse_time(text: str) -> float:
@@ -114,6 +115,16 @@ class FaceSwapApp:
         self.dl_send_after = BooleanVar(value=True)
         self.dl_browser = StringVar(value="없음")
 
+        # highlight state
+        self.hl_input_path: str | None = None
+        self.hl_output_dir: str | None = None
+        self.hl_input_info = StringVar(value="선택된 동영상 없음")
+        self.hl_output_info = StringVar(value="선택된 저장 폴더 없음")
+        self.hl_num_clips = StringVar(value="5")
+        self.hl_clip_len = StringVar(value="60")
+        self.hl_status = StringVar(value="동영상 + 클립 개수/길이 + 저장 폴더 선택 후 시작.")
+        self.hl_ranges: list[tuple[float, float]] = []
+
         # merge state
         self.mg_files: list[str] = []
         self.mg_output_path: str | None = None
@@ -147,17 +158,20 @@ class FaceSwapApp:
         self.download_tab = Frame(nb)
         self.trim_tab = Frame(nb)
         self.merge_tab = Frame(nb)
+        self.highlight_tab = Frame(nb)
         nb.add(self.photo_tab, text="  사진 스왑  ")
         nb.add(self.video_tab, text="  동영상 스왑  ")
         nb.add(self.download_tab, text="  동영상 다운로드  ")
         nb.add(self.trim_tab, text="  동영상 자르기  ")
         nb.add(self.merge_tab, text="  동영상 합치기  ")
+        nb.add(self.highlight_tab, text="  자동 하이라이트  ")
 
         self._build_photo_tab(self.photo_tab)
         self._build_video_tab(self.video_tab)
         self._build_download_tab(self.download_tab)
         self._build_trim_tab(self.trim_tab)
         self._build_merge_tab(self.merge_tab)
+        self._build_highlight_tab(self.highlight_tab)
 
         note = Label(
             self.root,
@@ -1010,6 +1024,145 @@ class FaceSwapApp:
             self._send_to_video_swap(self.mg_output_path)
         else:
             messagebox.showinfo("합치기 완료", f"저장됨:\n{self.mg_output_path}")
+
+    # --------------------------------------------------------- highlight UI
+    def _build_highlight_tab(self, parent: Frame) -> None:
+        wrap = Frame(parent, padx=16, pady=16)
+        wrap.pack(fill="both", expand=True)
+
+        Label(wrap, text="원본 동영상 (길이 5분 이상 권장)",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.hl_input_info, fg="#333", wraplength=800, justify="left").pack(anchor="w", pady=4)
+        Button(wrap, text="동영상 선택...", command=self._hl_pick_input, padx=10, pady=4).pack(anchor="w")
+
+        Label(wrap, text="").pack()
+        opt_row = Frame(wrap)
+        opt_row.pack(fill="x", pady=(0, 4))
+        Label(opt_row, text="찾을 클립 개수:").pack(side="left")
+        ttk.Spinbox(opt_row, from_=1, to=20, textvariable=self.hl_num_clips, width=6).pack(side="left", padx=(6, 20))
+        Label(opt_row, text="각 클립 길이(초):").pack(side="left")
+        ttk.Spinbox(opt_row, from_=10, to=300, increment=10, textvariable=self.hl_clip_len, width=6).pack(side="left", padx=(6, 0))
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="저장 폴더 (여러 클립이 이 폴더에 저장됨)",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.hl_output_info, fg="#333", wraplength=800, justify="left").pack(anchor="w", pady=4)
+        Button(wrap, text="저장 폴더 지정...", command=self._hl_pick_output, padx=10, pady=4).pack(anchor="w")
+
+        btns = Frame(wrap)
+        btns.pack(pady=(12, 4))
+        self.hl_start_btn = Button(
+            btns, text="분석 후 자동 저장", command=self._run_highlight,
+            font=("Segoe UI", 13, "bold"),
+            bg="#6d4c41", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#4b342e", activeforeground="white",
+        )
+        self.hl_start_btn.pack(side="left", padx=4)
+
+        self.hl_progress = ttk.Progressbar(wrap, mode="determinate", length=520, maximum=100)
+        self.hl_progress.pack(pady=6, fill="x")
+        Label(wrap, textvariable=self.hl_status, fg="#555", wraplength=800, justify="left").pack(anchor="w", pady=(2, 8))
+
+        Label(
+            wrap,
+            text="점수 = 음성 에너지 × 0.5 + 얼굴 크기 × 0.3 + 움직임 × 0.2. "
+                 "AI가 재미를 이해하는 게 아니라 이 세 신호로 후보를 추천합니다.",
+            fg="#888", font=("Segoe UI", 9), wraplength=800, justify="left",
+        ).pack(anchor="w")
+
+    def _hl_pick_input(self) -> None:
+        path = filedialog.askopenfilename(
+            title="원본 동영상 선택",
+            filetypes=[("동영상", "*.mp4 *.mov *.avi *.mkv *.webm"), ("모든 파일", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            info = probe_video(path)
+        except Exception as e:
+            messagebox.showerror("동영상 오류", str(e))
+            return
+        dur = info["duration_sec"]
+        m, s = divmod(int(dur), 60)
+        self.hl_input_info.set(
+            f"{Path(path).name}\n"
+            f"{info['width']}x{info['height']} · {info['fps']:.1f} fps · {m}:{s:02d}"
+        )
+        self.hl_input_path = path
+
+    def _hl_pick_output(self) -> None:
+        path = filedialog.askdirectory(title="하이라이트 저장 폴더 선택")
+        if path:
+            self.hl_output_dir = path
+            self.hl_output_info.set(path)
+
+    def _hl_progress(self, pct: float, msg: str) -> None:
+        self.root.after(0, lambda: (self.hl_progress.config(value=pct * 100),
+                                    self.hl_status.set(f"{msg} · {pct * 100:.1f}%")))
+
+    def _run_highlight(self) -> None:
+        if not self.hl_input_path:
+            messagebox.showwarning("동영상 필요", "원본 동영상을 먼저 선택하세요.")
+            return
+        if not self.hl_output_dir:
+            messagebox.showwarning("저장 폴더 필요", "저장 폴더를 지정하세요.")
+            return
+        try:
+            n = int(self.hl_num_clips.get())
+            length = int(self.hl_clip_len.get())
+        except ValueError:
+            messagebox.showwarning("입력 오류", "클립 개수/길이는 숫자로 입력하세요.")
+            return
+        if n < 1 or length < 5:
+            messagebox.showwarning("입력 오류", "개수 ≥ 1, 길이 ≥ 5초 여야 해요.")
+            return
+
+        self.hl_start_btn.config(state="disabled", text="분석 중...")
+        self.hl_progress.config(value=0)
+        self.hl_status.set("분석 시작...")
+        threading.Thread(target=self._hl_worker, args=(n, length), daemon=True).start()
+
+    def _hl_worker(self, num_clips: int, clip_len: int) -> None:
+        try:
+            pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.hl_status.set, s))
+            self.root.after(0, self.hl_status.set, "하이라이트 분석 중...")
+            ranges = find_highlights(
+                video_path=self.hl_input_path,
+                detector=pipe.detector,
+                num_clips=num_clips,
+                clip_duration_sec=clip_len,
+                progress=self._hl_progress,
+            )
+            if not ranges:
+                raise RuntimeError("추출할 하이라이트를 못 찾았어요.")
+
+            self.root.after(0, self.hl_status.set, f"{len(ranges)}개 클립 저장 중...")
+            paths = extract_highlight_clips(
+                video_path=self.hl_input_path,
+                ranges=ranges,
+                output_dir=self.hl_output_dir,
+                reencode=True,
+                progress=lambda p, m: self.root.after(0, self.hl_status.set, m),
+            )
+            summary = "\n".join(
+                f"  {i+1}. {int(s)//60}:{int(s)%60:02d} ~ {int(e)//60}:{int(e)%60:02d}  →  {p.name}"
+                for i, ((s, e), p) in enumerate(zip(ranges, paths))
+            )
+            self.root.after(0, self._on_hl_done, None, len(paths), summary)
+        except Exception as e:
+            self.root.after(0, self._on_hl_done, str(e), 0, "")
+
+    def _on_hl_done(self, error, count, summary) -> None:
+        self.hl_start_btn.config(state="normal", text="분석 후 자동 저장")
+        if error:
+            self.hl_progress.config(value=0)
+            self.hl_status.set("에러 발생")
+            messagebox.showerror("하이라이트 실패", error)
+            return
+        self.hl_progress.config(value=100)
+        self.hl_status.set(f"완료 · {count}개 클립을 {self.hl_output_dir} 에 저장")
+        messagebox.showinfo("하이라이트 완료",
+            f"{count}개 클립 저장됨:\n\n{summary}\n\n폴더: {self.hl_output_dir}")
 
     def run(self) -> None:
         self.root.mainloop()
