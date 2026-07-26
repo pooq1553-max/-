@@ -237,8 +237,8 @@ class FaceSwapApp:
             variable=self.v_replace_all,
         ).pack(side="left")
 
-        res_row = Frame(parent, padx=8, pady=(0, 4))
-        res_row.pack(fill="x")
+        res_row = Frame(parent, padx=8)
+        res_row.pack(fill="x", pady=(0, 4))
         Label(res_row, text="처리 해상도:").pack(side="left")
         ttk.Combobox(
             res_row,
