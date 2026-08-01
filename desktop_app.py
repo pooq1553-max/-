@@ -104,6 +104,7 @@ class FaceSwapApp:
         self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
         self.v_running = False
         self.v_resolution = StringVar(value="원본 유지")
+        self._video_proc_start: float | None = None
 
         # download state
         default_dl = Path.home() / "Downloads"
@@ -465,16 +466,43 @@ class FaceSwapApp:
             return
         self.v_running = True
         self._cancel = False
+        self._video_proc_start = None
         self.v_start_btn.config(state="disabled")
         self.v_cancel_btn.config(state="normal")
         self.v_progress.config(mode="determinate", value=0)
         self.v_status.set("시작 중...")
         threading.Thread(target=self._video_worker, daemon=True).start()
 
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        seconds = int(max(0, seconds))
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h > 0:
+            return f"{h}시간 {m}분"
+        if m > 0:
+            return f"{m}분 {s}초"
+        return f"{s}초"
+
     def _video_progress(self, done: int, total: int, msg: str) -> None:
         pct = (done / total * 100) if total > 0 else 0
+        # 실제 프레임 처리가 시작된 시점(첫 프레임)부터 재서 모델 로딩 시간 제외
+        now = time.time()
+        if self._video_proc_start is None and done > 0:
+            self._video_proc_start = now
+
+        extra = ""
+        if self._video_proc_start is not None and done > 0 and total > 0:
+            elapsed = now - self._video_proc_start
+            fps = done / elapsed if elapsed > 0 else 0
+            remaining = total - done
+            if fps > 0:
+                eta = remaining / fps
+                extra = f" · 남은 시간 약 {self._fmt_eta(eta)} · {fps:.1f} 프레임/초"
+
+        text = f"{msg} · {pct:.1f}%{extra}"
         self.root.after(0, lambda: (self.v_progress.config(value=pct),
-                                     self.v_status.set(f"{msg} · {pct:.1f}%")))
+                                     self.v_status.set(text)))
 
     def _video_worker(self) -> None:
         start = time.time()
