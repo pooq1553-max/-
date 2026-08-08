@@ -70,20 +70,42 @@ def fetch_real(symbols, chunk_size=80):
 
         for sym in chunk:
             closes = _series(raw, sym, "Close")
+            if len(closes) < 30:
+                continue
+            opens = _series(raw, sym, "Open")
             highs = _series(raw, sym, "High")
             lows = _series(raw, sym, "Low")
             vols = _series(raw, sym, "Volume")
-            if len(closes) < 30:
+
+            kc = closes.reindex(spine).ffill()
+            if kc.dropna().empty:
                 continue
-            k = closes.reindex(spine).ffill()
-            v = vols.reindex(spine).ffill()
-            if k.dropna().empty:
-                continue
+            ko = opens.reindex(spine).ffill()
+            kh = highs.reindex(spine).ffill()
+            kl = lows.reindex(spine).ffill()
+            kv = vols.reindex(spine).ffill()
+
+            k, od, hd, ld, v = [], [], [], [], []
+            for i in range(len(spine)):
+                c = kc.iloc[i]
+                if pd.isna(c):
+                    k.append(None); od.append(0); hd.append(0); ld.append(0); v.append(0)
+                    continue
+                c = float(c)
+                o = float(ko.iloc[i]) if not pd.isna(ko.iloc[i]) else c
+                h = float(kh.iloc[i]) if not pd.isna(kh.iloc[i]) else max(o, c)
+                l = float(kl.iloc[i]) if not pd.isna(kl.iloc[i]) else min(o, c)
+                k.append(round(c, 2))
+                od.append(round(o - c, 2))
+                hd.append(round(max(h, o, c) - c, 2))
+                ld.append(round(min(l, o, c) - c, 2))
+                vv = kv.iloc[i]
+                v.append(0 if pd.isna(vv) else int(round(float(vv) / 1000)))
+
             out[sym] = dict(
-                k=[None if pd.isna(x) else round(float(x), 2) for x in k],
-                v=[0 if pd.isna(x) else int(round(float(x) / 1000)) for x in v],
-                h52=float(highs.max()) if len(highs) else float(k.max()),
-                l52=float(lows.min()) if len(lows) else float(k.min()),
+                k=k, od=od, hd=hd, ld=ld, v=v,
+                h52=float(highs.max()) if len(highs) else max(x for x in k if x is not None),
+                l52=float(lows.min()) if len(lows) else min(x for x in k if x is not None),
             )
         print(f"  ... {min(start+chunk_size, len(uniq))}/{len(uniq)}", file=sys.stderr)
 
@@ -113,15 +135,26 @@ def fetch_demo(symbols):
     for sym in sorted(set(symbols)):
         drift = theme_drift[sym_theme[sym]]
         vol = rng.uniform(0.012, 0.045)
-        price = rng.uniform(9, 520)
+        close = rng.uniform(9, 520)
         base_vol = rng.uniform(4e5, 4e7)
-        ks, vs = [], []
+        ks, od, hd, ld, vs = [], [], [], [], []
+        hi_all, lo_all = -1e9, 1e9
         for _ in range(DAYS):
-            price = max(0.6, price * (1 + rng.gauss(drift, vol)))
-            ks.append(round(price, 2))
+            prev = close
+            op = max(0.6, prev * (1 + rng.gauss(0, vol * 0.35)))
+            close = max(0.6, prev * (1 + rng.gauss(drift, vol)))
+            wick = max(op, close) * rng.uniform(0.002, 0.02)
+            hi = max(op, close) + wick * rng.uniform(0.2, 1.0)
+            lo = min(op, close) - wick * rng.uniform(0.2, 1.0)
+            ks.append(round(close, 2))
+            od.append(round(op - close, 2))
+            hd.append(round(hi - close, 2))
+            ld.append(round(lo - close, 2))
             vs.append(int(base_vol * rng.uniform(0.45, 2.3) / 1000))
-        out[sym] = dict(k=ks, v=vs, h52=max(ks) * rng.uniform(1.0, 1.06),
-                        l52=min(ks) * rng.uniform(0.94, 1.0))
+            hi_all, lo_all = max(hi_all, hi), min(lo_all, lo)
+        out[sym] = dict(k=ks, od=od, hd=hd, ld=ld, v=vs,
+                        h52=hi_all * rng.uniform(1.0, 1.05),
+                        l52=lo_all * rng.uniform(0.95, 1.0))
     return out, dates
 
 
@@ -152,7 +185,7 @@ def build_payload(series, dates, demo):
             h=round(h52, 2), l=round(d["l52"], 2),
             ph=round(price / h52 * 100, 1) if h52 else 0.0,
             vr=round(d["v"][-1] / avg_v, 2) if avg_v else 1.0,
-            k=d["k"], v=d["v"],
+            k=d["k"], od=d["od"], hd=d["hd"], ld=d["ld"], v=d["v"],
         )
 
     themes = {}
@@ -370,10 +403,12 @@ tbody tr:last-child td{border-bottom:0}
 canvas{display:block; width:100%; height:auto; touch-action:none}
 .tip{
   position:absolute; pointer-events:none; opacity:0; transition:opacity .1s;
-  background:var(--ink); color:var(--bg); border-radius:6px;
-  padding:6px 9px; font-family:var(--mono); font-size:11px; line-height:1.45;
+  background:var(--panel); color:var(--ink); border:1px solid var(--line);
+  border-radius:6px; box-shadow:var(--shadow);
+  padding:6px 9px; font-family:var(--mono); font-size:11px; line-height:1.5;
   font-variant-numeric:tabular-nums; white-space:nowrap; z-index:5;
 }
+.tip b{font-weight:800}
 .stats{
   display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr));
   gap:1px; margin-top:14px; background:var(--line-2);
@@ -471,7 +506,7 @@ canvas{display:block; width:100%; height:auto; touch-action:none}
 var D = JSON.parse(document.getElementById("payload").textContent);
 var S = D.stocks, T = D.themes, G = D.groups, DATES = D.dates;
 var GROUPS = Object.keys(G);
-var state = {group:"요약", theme:null, sym:null, range:252, sort:"c", dir:-1};
+var state = {group:"요약", theme:null, sym:null, range:126, sort:"c", dir:-1};
 
 var $ = function(id){ return document.getElementById(id); };
 var esc = function(s){ return String(s).replace(/[&<>"]/g, function(c){
@@ -496,7 +531,8 @@ if (D.demo) {
 $("note").innerHTML = '<b>★</b> 52주 고가 대비 98% 이상 (신고가권) · '
   + '<b>◆</b> 95% 이상 · <b>거래량</b>은 20일 평균 대비 배수. '
   + '테마 등락률은 소속 종목 등락률의 단순 평균입니다. '
-  + '상승은 빨강, 하락은 파랑으로 표시했습니다.<br>'
+  + '차트는 일봉이며 <b>양봉(종가≥시가)은 빨강</b>, <b>음봉은 파랑</b>, '
+  + '그 아래는 거래량입니다. 봉에 커서를 올리면 시·고·저·종가가 나옵니다.<br>'
   + '생성 시각 ' + esc(D.generated) + ' · 자동 생성 자료이며 투자 권유가 아닙니다.';
 
 /* ── 탭 ── */
@@ -521,6 +557,10 @@ function drawChart(){
   var st = S[cvSym], C = themeColors();
   var n = Math.min(state.range, st.k.length);
   var ks = st.k.slice(-n), vs = st.v.slice(-n), ds = DATES.slice(-n);
+  var od = st.od.slice(-n), hd = st.hd.slice(-n), ld = st.ld.slice(-n);
+  var O = function(i){ return ks[i] + od[i]; };
+  var Hi = function(i){ return ks[i] + hd[i]; };
+  var Lo = function(i){ return ks[i] + ld[i]; };
 
   var pts = [];
   for (var i = 0; i < ks.length; i++) if (ks[i] !== null) pts.push(i);
@@ -539,8 +579,12 @@ function drawChart(){
   var plotW = W - padL - padR;
 
   var lo = Infinity, hi = -Infinity;
-  pts.forEach(function(i){ if (ks[i] < lo) lo = ks[i]; if (ks[i] > hi) hi = ks[i]; });
-  var showH52 = st.h && st.h <= hi * 1.35 && st.h >= lo;
+  pts.forEach(function(i){
+    if (Lo(i) < lo) lo = Lo(i);
+    if (Hi(i) > hi) hi = Hi(i);
+  });
+  /* 52주 고가선은 화면 고점에 가까울 때만 (멀면 봉이 눌려서 안 보인다) */
+  var showH52 = st.h && st.h <= hi * 1.08 && st.h >= lo;
   if (showH52) hi = Math.max(hi, st.h);
   var span = (hi - lo) || 1; lo -= span * 0.08; hi += span * 0.08; span = hi - lo;
 
@@ -568,35 +612,34 @@ function drawChart(){
     ctx.fillText("52주 고가", padL + plotW - 4, Y(st.h) - 8);
   }
 
-  /* 가격 면적 + 라인 */
-  var rising = ks[pts[pts.length - 1]] >= ks[pts[0]];
-  var col = rising ? C.up : C.down;
-  var grd = ctx.createLinearGradient(0, padT, 0, padT + priceH);
-  grd.addColorStop(0, col + "38"); grd.addColorStop(1, col + "05");
-  ctx.beginPath(); ctx.moveTo(X(pts[0]), Y(ks[pts[0]]));
-  pts.forEach(function(i){ ctx.lineTo(X(i), Y(ks[i])); });
-  ctx.lineTo(X(pts[pts.length - 1]), padT + priceH); ctx.lineTo(X(pts[0]), padT + priceH);
-  ctx.closePath(); ctx.fillStyle = grd; ctx.fill();
+  /* 봉차트 */
+  var cw = plotW / ks.length;
+  var bw = Math.max(1, Math.min(13, cw * 0.68));
+  var thin = bw < 2.6;                     /* 봉이 좁으면 몸통만 */
+  pts.forEach(function(i){
+    var c = ks[i], o = O(i), h = Hi(i), l = Lo(i);
+    var up = c >= o, col = up ? C.up : C.down;
+    var x = X(i), rx = Math.round(x) + .5;
 
-  ctx.beginPath(); ctx.moveTo(X(pts[0]), Y(ks[pts[0]]));
-  pts.forEach(function(i){ ctx.lineTo(X(i), Y(ks[i])); });
-  ctx.strokeStyle = col; ctx.lineWidth = 1.7; ctx.lineJoin = "round"; ctx.stroke();
-
-  /* 종점 강조 */
-  var li = pts[pts.length - 1];
-  ctx.beginPath(); ctx.arc(X(li), Y(ks[li]), 3.4, 0, Math.PI * 2);
-  ctx.fillStyle = col; ctx.fill();
-  ctx.beginPath(); ctx.arc(X(li), Y(ks[li]), 6.4, 0, Math.PI * 2);
-  ctx.strokeStyle = col + "60"; ctx.lineWidth = 1.4; ctx.stroke();
+    if (!thin) {                            /* 꼬리 */
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(rx, Y(h)); ctx.lineTo(rx, Y(l)); ctx.stroke();
+    }
+    var yTop = Y(Math.max(o, c)), yBot = Y(Math.min(o, c));
+    var bh = Math.max(1, yBot - yTop);
+    ctx.fillStyle = col;
+    if (thin) ctx.fillRect(rx - bw / 2, Y(h), Math.max(1, bw), Math.max(1, Y(l) - Y(h)));
+    else ctx.fillRect(x - bw / 2, yTop, bw, bh);
+  });
 
   /* 거래량 */
   var vTop = padT + priceH + gap, vMax = Math.max.apply(null, vs) || 1;
-  var bw = Math.max(1, plotW / ks.length * 0.62);
   for (var j = 0; j < vs.length; j++) {
-    var h = (vs[j] / vMax) * volH;
-    var uptick = j > 0 && ks[j] !== null && ks[j-1] !== null ? ks[j] >= ks[j-1] : true;
-    ctx.fillStyle = (uptick ? C.up : C.down) + "4d";
-    ctx.fillRect(X(j) - bw / 2, vTop + volH - h, bw, h);
+    if (ks[j] === null) continue;
+    var vh = (vs[j] / vMax) * volH;
+    var upv = ks[j] >= O(j);
+    ctx.fillStyle = (upv ? C.up : C.down) + "66";
+    ctx.fillRect(X(j) - bw / 2, vTop + volH - vh, Math.max(1, bw), vh);
   }
   ctx.fillStyle = C.ink3; ctx.textAlign = "left";
   ctx.fillText("거래량", padL + plotW + 7, vTop + volH / 2);
@@ -613,15 +656,15 @@ function drawChart(){
 
   /* 십자선 */
   if (hoverI >= 0 && hoverI < ks.length && ks[hoverI] !== null) {
-    var hx = X(hoverI), hy = Y(ks[hoverI]);
+    var hx = Math.round(X(hoverI)) + .5;
     ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = C.ink3; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, vTop + volH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, Math.round(Y(ks[hoverI])) + .5);
+    ctx.lineTo(padL + plotW, Math.round(Y(ks[hoverI])) + .5); ctx.stroke();
     ctx.restore();
-    ctx.beginPath(); ctx.arc(hx, hy, 3.6, 0, Math.PI * 2);
-    ctx.fillStyle = C.panel; ctx.fill();
-    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
   }
-  cvPts = {X:X, ks:ks, ds:ds, vs:vs, n:ks.length, padL:padL, plotW:plotW};
+  cvPts = {X:X, Y:Y, ks:ks, od:od, hd:hd, ld:ld, ds:ds, vs:vs,
+           n:ks.length, padL:padL, plotW:plotW, priceH:priceH, padT:padT};
 }
 
 function chartMarkup(sym){
@@ -667,14 +710,24 @@ function mountChart(){
     if (i === hoverI) return;
     hoverI = i; drawChart();
     var k = cvPts.ks[i]; if (k === null) { tip.style.opacity = 0; return; }
-    var pv = i > 0 ? cvPts.ks[i-1] : k;
+    var pv = i > 0 && cvPts.ks[i-1] !== null ? cvPts.ks[i-1] : k;
     var ch = pv ? (k / pv - 1) * 100 : 0;
-    tip.innerHTML = esc(cvPts.ds[i]) + '<br>' + money(k)
-      + ' <span style="opacity:.75">' + sgn(ch) + '</span>';
+    var o = k + cvPts.od[i], h = k + cvPts.hd[i], l = k + cvPts.ld[i];
+    var f = function(v){ return v.toFixed(v < 10 ? 3 : 2); };
+    tip.innerHTML = esc(cvPts.ds[i])
+      + ' <span class="' + cls(ch) + '">' + sgn(ch) + '</span><br>'
+      + '시 ' + f(o) + '  고 ' + f(h) + '<br>'
+      + '저 ' + f(l) + '  종 <b>' + f(k) + '</b><br>'
+      + '<span style="opacity:.7">거래량 '
+      + (cvPts.vs[i] * 1000).toLocaleString("en-US") + '</span>';
     tip.style.opacity = 1;
-    var tw = tip.offsetWidth, px = cvPts.X(i);
+    var tw = tip.offsetWidth, th = tip.offsetHeight, px = cvPts.X(i);
     tip.style.left = Math.max(2, Math.min(cv.clientWidth - tw - 2, px - tw / 2)) + "px";
-    tip.style.top = "6px";
+    /* 봉을 가리지 않도록 커서 반대쪽에 붙인다 */
+    var mid = cvPts.padT + cvPts.priceH / 2;
+    tip.style.top = (cvPts.Y(k) > mid
+      ? cvPts.padT + 4
+      : cvPts.padT + cvPts.priceH - th - 4) + "px";
   };
   cv.addEventListener("mousemove", move);
   cv.addEventListener("touchmove", function(e){ move(e); }, {passive:true});
