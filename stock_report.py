@@ -12,6 +12,7 @@ pip install yfinance pandas schedule
 """
 import argparse
 import time
+import unicodedata
 import warnings
 import sys
 from datetime import datetime, timedelta
@@ -190,6 +191,337 @@ KR_SECTORS = {
     "기타":       ["034730.KS","078930.KS","180640.KS","035250.KS",
                    "010130.KS","047050.KS","100840.KS","192820.KS",
                    "011200.KS","357780.KQ"],
+}
+
+# ─── 미장 세부 테마 (관심종목 탭) ───
+US_THEMES = {
+    # 반도체
+    "DRAM/메모리":      ["MU","SNDK","STX","WDC","NVMI"],
+    "CPU":              ["AMD","INTC","ARM","QCOM"],
+    "GPU/AI가속기":     ["NVDA","AVGO","MRVL","ALAB","CRDO"],
+    "파운드리":         ["TSM","GFS","UMC","ASX","AMKR"],
+    "반도체장비":       ["AMAT","LRCX","KLAC","ASML","TER","ONTO","ACMR","UCTT","AEIS","CAMT","VECO","AMBA"],
+    "EDA/반도체IP":     ["SNPS","CDNS","ARM","LSCC","RMBS","CEVA"],
+    "아날로그/전력반도체":["TXN","ADI","NXPI","ON","MCHP","MPWR","WOLF","STM","SLAB","SITM","POWI","DIOD"],
+    "반도체소재":       ["ENTG","MKSI","IPGP","COHU","FORM","AXT"],
+
+    # AI / 소프트웨어
+    "AI인프라/데이터":  ["PLTR","SNOW","MDB","CFLT","DDOG","AI","BBAI","SOUN","TEM"],
+    "클라우드":         ["MSFT","AMZN","GOOGL","ORCL","NOW","CRM","IBM"],
+    "사이버보안":       ["CRWD","PANW","ZS","FTNT","S","NET","OKTA","CYBR","QLYS","TENB","RPD","VRNS"],
+    "양자컴퓨팅":       ["IONQ","RGTI","QBTS","QUBT","ARQQ"],
+    "엔터프라이즈SW":   ["ADBE","INTU","WDAY","TEAM","HUBS","ZM","DOCU","TWLO","PATH","MNDY","GTLB","BILL"],
+
+    # 하드웨어 / 네트워킹
+    "서버/데이터센터HW":["DELL","SMCI","HPE","ANET","PSTG","NTAP","VRT"],
+    "광통신":           ["CIEN","LITE","COHR","AAOI","FN","APH","POET"],
+    "네트워크장비":     ["CSCO","JNPR","EXTR","NTGR","CALX","HLIT"],
+
+    # 전력 / 에너지 전환
+    "원자력/우라늄":    ["CEG","VST","SMR","OKLO","LEU","CCJ","NNE","BWXT","UEC","DNN","UUUU","ASPI"],
+    "전력장비/그리드":  ["ETN","PWR","GEV","EMR","HUBB","NVT","AZZ","POWL","GNRC","ATKR"],
+    "태양광":           ["FSLR","ENPH","SEDG","RUN","NXT","ARRY","SHLS","CSIQ","JKS","MAXN","SPWR"],
+    "풍력":             ["GEV","TPIC","AMSC","NEP"],
+    "수소/연료전지":    ["PLUG","BE","BLDP","FCEL","HYSR"],
+    "유틸리티":         ["NEE","DUK","SO","AEP","D","EXC","XEL","SRE","PCG","ED","WEC","ES"],
+
+    # 전기차 / 모빌리티
+    "전기차":           ["TSLA","RIVN","LCID","NIO","XPEV","LI","ZK","VFS"],
+    "자율주행/라이다":  ["MBLY","LAZR","OUST","INVZ","AUR","PONY","GRAB","UBER","LYFT"],
+    "전통자동차":       ["GM","F","STLA","TM","HMC","RACE"],
+    "배터리/리튬":      ["ALB","SQM","PLL","LAC","QS","ENVX","FREY","SLDP","AMPX","MP"],
+    "EV충전":           ["CHPT","BLNK","EVGO","WBX"],
+
+    # 바이오 / 헬스케어
+    "GLP-1/비만치료":   ["LLY","NVO","VKTX","ALT","TERN","GPCR","AMGN","ZEAL"],
+    "대형제약":         ["JNJ","PFE","MRK","ABBV","BMY","AZN","GSK","SNY","NVS","TAK"],
+    "바이오테크":       ["GILD","VRTX","REGN","BIIB","MRNA","BNTX","ALNY","INCY","EXAS","NBIX","SRPT","RARE","IONS","BMRN"],
+    "의료기기":         ["ISRG","SYK","BSX","MDT","ABT","EW","ZBH","DXCM","PODD","TNDM","GMED","NVCR"],
+    "의료보험/서비스":  ["UNH","ELV","CI","CVS","HUM","MCK","COR","CAH","HCA","THC","UHS"],
+    "라이프사이언스툴": ["TMO","DHR","A","WAT","MTD","RVTY","ILMN","PACB","TXG","QGEN","BRKR"],
+
+    # 금융
+    "대형은행":         ["JPM","BAC","WFC","C","GS","MS"],
+    "지역은행":         ["USB","PNC","TFC","MTB","FITB","RF","KEY","CFG","HBAN","ZION","CMA","WAL"],
+    "결제":             ["V","MA","AXP","PYPL","FI","GPN","FOUR","TOST","XYZ","WEX"],
+    "핀테크":           ["SOFI","AFRM","UPST","LC","HOOD","NU","DAVE","PGY","OPFI"],
+    "크립토/마이닝":    ["COIN","MSTR","MARA","RIOT","CLSK","HUT","CIFR","WULF","BITF","HIVE","BTBT","GLXY","CORZ","IREN","BMNR"],
+    "자산운용/PE":      ["BLK","BX","KKR","APO","ARES","TROW","BEN","SCHW","IBKR","OWL","TPG"],
+    "보험":             ["BRK-B","PGR","ALL","TRV","CB","AIG","MET","PRU","HIG","AFL","CINF","EG"],
+    "거래소/금융데이터":["ICE","CME","NDAQ","CBOE","SPGI","MCO","MSCI","FDS","MORN","TW","VIRT"],
+
+    # 소비재 / 리테일
+    "대형리테일":       ["WMT","COST","TGT","DG","DLTR","BJ","KR","ROST","TJX","BURL","FIVE","OLLI"],
+    "이커머스":         ["AMZN","SHOP","ETSY","EBAY","W","CHWY","CVNA","MELI","SE","CPNG","BABA","PDD","JD","GLBE"],
+    "음식료":           ["KO","PEP","MDLZ","GIS","HSY","KHC","CAG","CPB","SJM","MNST","CELH","KDP","K","TSN","HRL"],
+    "레스토랑":         ["MCD","SBUX","CMG","YUM","QSR","DPZ","WING","SHAK","TXRH","DRI","CAVA","EAT"],
+    "의류/스포츠":      ["NKE","LULU","DECK","ONON","SKX","VFC","RL","PVH","ANF","UAA","CROX","BIRK","GAP"],
+    "화장품/뷰티":      ["EL","ULTA","COTY","ELF","IPAR"],
+    "생활용품":         ["PG","CL","KMB","CHD","CLX","EPC","REYN"],
+    "담배/주류":        ["PM","MO","BTI","STZ","DEO","TAP","SAM","BF-B"],
+    "여행/항공":        ["DAL","UAL","AAL","LUV","ALK","BKNG","ABNB","EXPE","MAR","HLT","H","RCL","CCL","NCLH","TRIP"],
+    "반려동물":         ["CHWY","IDXX","ZTS","FRPT","ELAN","TRUP","WOOF"],
+
+    # 미디어 / 엔터
+    "스트리밍/미디어":  ["NFLX","DIS","WBD","PARA","CMCSA","ROKU","SPOT","FUBO","LYV"],
+    "게임":             ["EA","TTWO","RBLX","U","PLTK","APP","GRVY","SKLZ"],
+    "카지노/베팅":      ["DKNG","PENN","CZR","MGM","LVS","WYNN","BYD","CHDN","FLUT","RSI"],
+    "광고/마케팅테크":  ["GOOGL","META","TTD","APP","PINS","SNAP","RDDT","OMC","IPG","MGNI","CRTO","DV","ZETA","IAS"],
+    "소셜/데이팅":      ["META","PINS","SNAP","RDDT","MTCH","BMBL","NXST"],
+
+    # 산업 / 방산 / 우주
+    "방산":             ["LMT","RTX","NOC","GD","LHX","HII","TXT","HWM","TDG","AXON","KTOS","AVAV","LDOS","BAH","CACI","SAIC","RCAT"],
+    "우주/위성":        ["RKLB","LUNR","ASTS","PL","RDW","IRDM","VSAT","GSAT","SPCE","MNTS"],
+    "항공기/부품":      ["BA","ERJ","HWM","TDG","SPR","HEI","CW","MOG-A"],
+    "기계/중장비":      ["CAT","DE","CMI","PCAR","AGCO","TEX","OSK","URI","HRI","ALG","MTW"],
+    "산업자동화/로봇":  ["ROK","ABB","SYM","NDSN","ZBRA","CGNX","MIDD","EMR","HON","AME","PH","DOV","ITW","IR","GGG"],
+    "건설/엔지니어링":  ["PWR","EME","MTZ","ACM","J","FLR","DY","GVA","STRL","ROAD","IESC","PRIM"],
+    "주택건설":         ["DHI","LEN","PHM","NVR","TOL","KBH","TMHC","MTH","MHO","BLDR","POOL","IBP"],
+    "철도/운송":        ["UNP","CSX","NSC","CP","CNI"],
+    "물류/택배":        ["UPS","FDX","XPO","ODFL","SAIA","CHRW","EXPD","GXO","JBHT","KNX","RXO"],
+    "해운/탱커":        ["ZIM","MATX","SBLK","GNK","EGLE","GOGL","DAC","GSL","KEX","TNK","FRO","DHT","INSW","STNG"],
+    "3D프린팅":         ["DDD","SSYS","MKFG","VJET","XMTR","PRLB"],
+
+    # 소재 / 에너지
+    "석유가스대형":     ["XOM","CVX","COP","OXY","EOG","PSX","VLO","MPC","HES","DVN","FANG","PR","CTRA","APA"],
+    "오일서비스":       ["SLB","HAL","BKR","NOV","CHX","WFRD","TDW","RIG","VAL"],
+    "LNG/파이프라인":   ["LNG","ET","EPD","KMI","WMB","OKE","TRGP","MPLX","PAA","DTM","NEXT","GLNG"],
+    "금/은광산":        ["NEM","GOLD","AEM","KGC","AU","HMY","GFI","WPM","FNV","RGLD","BTG","EGO","IAG","CDE","HL","AG","PAAS"],
+    "구리/산업금속":    ["FCX","SCCO","TECK","RIO","BHP","VALE","AA","CENX","MP","ATI","CRS","HAYN","UEC"],
+    "철강":             ["NUE","STLD","CLF","X","RS","CMC","MT","TX","ZEUS"],
+    "화학":             ["LIN","APD","SHW","ECL","DD","DOW","LYB","PPG","EMN","CE","FMC","IFF","ASH","OLN","WLK"],
+    "목재/건자재":      ["WY","PCH","RYN","LPX","BCC","UFPI","MLM","VMC","EXP","SUM","CX","JHX"],
+    "농업/식품원재료":  ["ADM","BG","CTVA","MOS","CF","NTR","DAR","LW","INGR","ANDE"],
+
+    # 부동산 리츠
+    "데이터센터리츠":   ["EQIX","DLR","IRM"],
+    "통신타워리츠":     ["AMT","CCI","SBAC","UNIT"],
+    "산업/물류리츠":    ["PLD","EXR","PSA","CUBE","STAG","FR","EGP","TRNO","REXR"],
+    "리테일리츠":       ["SPG","O","KIM","REG","FRT","BRX","NNN","ADC","MAC"],
+    "주거리츠":         ["AVB","EQR","MAA","ESS","UDR","CPT","INVH","AMH","ELS","SUI"],
+    "헬스케어리츠":     ["WELL","VTR","OHI","DOC","CTRE","SBRA","NHI"],
+    "오피스/호텔리츠":  ["BXP","VNO","SLG","HST","RHP","PK","APLE","DRH"],
+
+    # 통신 / 기타
+    "통신사":           ["T","VZ","TMUS","LUMN","CHTR","CABO","FYBR","IRDM"],
+    "인력/컨설팅":      ["ACN","ADP","PAYX","PAYC","PCTY","RHI","MAN","KFY","CBZ","TNET"],
+    "교육":             ["CHGG","COUR","UDMY","LRN","ATGE","LOPE","STRA","PRDO"],
+    "대마":             ["TLRY","CGC","CRON","ACB","SNDL","GRWG"],
+}
+
+# 테마 대분류 (보고서 섹션 순서)
+THEME_GROUPS = {
+    "반도체": ["DRAM/메모리","CPU","GPU/AI가속기","파운드리","반도체장비",
+               "EDA/반도체IP","아날로그/전력반도체","반도체소재"],
+    "AI/소프트웨어": ["AI인프라/데이터","클라우드","사이버보안","양자컴퓨팅","엔터프라이즈SW"],
+    "하드웨어/네트워킹": ["서버/데이터센터HW","광통신","네트워크장비"],
+    "전력/에너지전환": ["원자력/우라늄","전력장비/그리드","태양광","풍력","수소/연료전지","유틸리티"],
+    "전기차/모빌리티": ["전기차","자율주행/라이다","전통자동차","배터리/리튬","EV충전"],
+    "바이오/헬스케어": ["GLP-1/비만치료","대형제약","바이오테크","의료기기","의료보험/서비스","라이프사이언스툴"],
+    "금융": ["대형은행","지역은행","결제","핀테크","크립토/마이닝","자산운용/PE","보험","거래소/금융데이터"],
+    "소비재/리테일": ["대형리테일","이커머스","음식료","레스토랑","의류/스포츠","화장품/뷰티",
+                      "생활용품","담배/주류","여행/항공","반려동물"],
+    "미디어/엔터": ["스트리밍/미디어","게임","카지노/베팅","광고/마케팅테크","소셜/데이팅"],
+    "산업/방산/우주": ["방산","우주/위성","항공기/부품","기계/중장비","산업자동화/로봇",
+                        "건설/엔지니어링","주택건설","철도/운송","물류/택배","해운/탱커","3D프린팅"],
+    "소재/에너지": ["석유가스대형","오일서비스","LNG/파이프라인","금/은광산","구리/산업금속",
+                    "철강","화학","목재/건자재","농업/식품원재료"],
+    "부동산리츠": ["데이터센터리츠","통신타워리츠","산업/물류리츠","리테일리츠",
+                   "주거리츠","헬스케어리츠","오피스/호텔리츠"],
+    "통신/기타": ["통신사","인력/컨설팅","교육","대마"],
+}
+
+# 테마 종목 이름 (NAMES에 없는 것들)
+THEME_NAMES = {
+    "MU":"Micron","SNDK":"SanDisk","STX":"Seagate","WDC":"Western Digital","NVMI":"Nova",
+    "TSM":"TSMC","GFS":"GlobalFoundries","UMC":"UMC","ASX":"ASE Tech","AMKR":"Amkor",
+    "ASML":"ASML","TER":"Teradyne","ONTO":"Onto Innovation","ACMR":"ACM Research",
+    "UCTT":"Ultra Clean","AEIS":"Advanced Energy","CAMT":"Camtek","VECO":"Veeco","AMBA":"Ambarella",
+    "LSCC":"Lattice","RMBS":"Rambus","CEVA":"CEVA","MPWR":"Monolithic Power","WOLF":"Wolfspeed",
+    "STM":"STMicro","SLAB":"Silicon Labs","SITM":"SiTime","POWI":"Power Integrations","DIOD":"Diodes",
+    "ENTG":"Entegris","MKSI":"MKS Instruments","IPGP":"IPG Photonics","COHU":"Cohu",
+    "FORM":"FormFactor","AXT":"AXT","ALAB":"Astera Labs","CRDO":"Credo",
+    "MDB":"MongoDB","CFLT":"Confluent","AI":"C3.ai","BBAI":"BigBear.ai","SOUN":"SoundHound","TEM":"Tempus AI",
+    "S":"SentinelOne","OKTA":"Okta","CYBR":"CyberArk","QLYS":"Qualys","TENB":"Tenable",
+    "RPD":"Rapid7","VRNS":"Varonis","NET":"Cloudflare","ZS":"Zscaler",
+    "IONQ":"IonQ","RGTI":"Rigetti","QBTS":"D-Wave","QUBT":"Quantum Computing","ARQQ":"Arqit",
+    "HUBS":"HubSpot","ZM":"Zoom","DOCU":"DocuSign","TWLO":"Twilio","PATH":"UiPath",
+    "MNDY":"Monday.com","GTLB":"GitLab","BILL":"Bill.com","WDAY":"Workday","TEAM":"Atlassian",
+    "HPE":"HP Enterprise","ANET":"Arista","PSTG":"Pure Storage","NTAP":"NetApp","VRT":"Vertiv",
+    "CIEN":"Ciena","LITE":"Lumentum","COHR":"Coherent","AAOI":"Applied Optoelectronics",
+    "FN":"Fabrinet","POET":"POET Tech","JNPR":"Juniper","EXTR":"Extreme Networks",
+    "NTGR":"NETGEAR","CALX":"Calix","HLIT":"Harmonic",
+    "CEG":"Constellation Energy","VST":"Vistra","SMR":"NuScale","OKLO":"Oklo","LEU":"Centrus",
+    "CCJ":"Cameco","NNE":"Nano Nuclear","BWXT":"BWX Tech","UEC":"Uranium Energy",
+    "DNN":"Denison Mines","UUUU":"Energy Fuels","ASPI":"ASP Isotopes",
+    "ETN":"Eaton","PWR":"Quanta Services","GEV":"GE Vernova","EMR":"Emerson","HUBB":"Hubbell",
+    "NVT":"nVent","AZZ":"AZZ","POWL":"Powell Industries","GNRC":"Generac","ATKR":"Atkore",
+    "FSLR":"First Solar","ENPH":"Enphase","SEDG":"SolarEdge","RUN":"Sunrun","NXT":"Nextracker",
+    "ARRY":"Array Tech","SHLS":"Shoals","CSIQ":"Canadian Solar","JKS":"JinkoSolar",
+    "MAXN":"Maxeon","SPWR":"SunPower","TPIC":"TPI Composites","AMSC":"American Superconductor",
+    "PLUG":"Plug Power","BE":"Bloom Energy","BLDP":"Ballard Power","FCEL":"FuelCell Energy",
+    "AEP":"American Electric","EXC":"Exelon","XEL":"Xcel Energy","SRE":"Sempra","PCG":"PG&E",
+    "ED":"Con Edison","WEC":"WEC Energy","ES":"Eversource",
+    "RIVN":"Rivian","LCID":"Lucid","NIO":"NIO","XPEV":"XPeng","LI":"Li Auto","ZK":"Zeekr","VFS":"VinFast",
+    "MBLY":"Mobileye","LAZR":"Luminar","OUST":"Ouster","INVZ":"Innoviz","AUR":"Aurora",
+    "PONY":"Pony.ai","GRAB":"Grab","LYFT":"Lyft",
+    "GM":"GM","F":"Ford","STLA":"Stellantis","TM":"Toyota","HMC":"Honda","RACE":"Ferrari",
+    "ALB":"Albemarle","SQM":"SQM","PLL":"Piedmont Lithium","LAC":"Lithium Americas",
+    "QS":"QuantumScape","ENVX":"Enovix","FREY":"FREYR","SLDP":"Solid Power","AMPX":"Amprius",
+    "MP":"MP Materials","CHPT":"ChargePoint","BLNK":"Blink Charging","EVGO":"EVgo","WBX":"Wallbox",
+    "NVO":"Novo Nordisk","VKTX":"Viking Therapeutics","ALT":"Altimmune","TERN":"Terns Pharma",
+    "GPCR":"Structure Therapeutics","ZEAL":"Zealand Pharma",
+    "AZN":"AstraZeneca","GSK":"GSK","SNY":"Sanofi","NVS":"Novartis","TAK":"Takeda",
+    "BIIB":"Biogen","BNTX":"BioNTech","ALNY":"Alnylam","INCY":"Incyte","EXAS":"Exact Sciences",
+    "NBIX":"Neurocrine","SRPT":"Sarepta","RARE":"Ultragenyx","IONS":"Ionis","BMRN":"BioMarin",
+    "MDT":"Medtronic","EW":"Edwards Lifesciences","ZBH":"Zimmer Biomet","PODD":"Insulet",
+    "TNDM":"Tandem Diabetes","GMED":"Globus Medical","NVCR":"NovoCure",
+    "ELV":"Elevance","CVS":"CVS Health","HUM":"Humana","MCK":"McKesson","COR":"Cencora",
+    "CAH":"Cardinal Health","HCA":"HCA Healthcare","THC":"Tenet Health","UHS":"Universal Health",
+    "A":"Agilent","WAT":"Waters","MTD":"Mettler-Toledo","RVTY":"Revvity","ILMN":"Illumina",
+    "PACB":"PacBio","TXG":"10x Genomics","QGEN":"Qiagen","BRKR":"Bruker",
+    "USB":"US Bancorp","PNC":"PNC","TFC":"Truist","MTB":"M&T Bank","FITB":"Fifth Third",
+    "RF":"Regions","KEY":"KeyCorp","CFG":"Citizens","HBAN":"Huntington","ZION":"Zions",
+    "CMA":"Comerica","WAL":"Western Alliance",
+    "PYPL":"PayPal","FI":"Fiserv","GPN":"Global Payments","FOUR":"Shift4","TOST":"Toast",
+    "XYZ":"Block","WEX":"WEX","SOFI":"SoFi","AFRM":"Affirm","UPST":"Upstart","LC":"LendingClub",
+    "HOOD":"Robinhood","NU":"Nu Holdings","DAVE":"Dave","PGY":"Pagaya","OPFI":"OppFi",
+    "MSTR":"MicroStrategy","MARA":"MARA Holdings","RIOT":"Riot Platforms","CLSK":"CleanSpark",
+    "HUT":"Hut 8","CIFR":"Cipher Mining","WULF":"TeraWulf","BITF":"Bitfarms","HIVE":"HIVE Digital",
+    "BTBT":"Bit Digital","GLXY":"Galaxy Digital","CORZ":"Core Scientific","IREN":"IREN","BMNR":"Bitmine",
+    "BX":"Blackstone","KKR":"KKR","APO":"Apollo","ARES":"Ares Management","TROW":"T. Rowe Price",
+    "BEN":"Franklin Resources","IBKR":"Interactive Brokers","OWL":"Blue Owl","TPG":"TPG",
+    "PGR":"Progressive","ALL":"Allstate","TRV":"Travelers","CB":"Chubb","AIG":"AIG",
+    "MET":"MetLife","PRU":"Prudential","HIG":"Hartford","AFL":"Aflac","CINF":"Cincinnati Financial",
+    "EG":"Everest Group","NDAQ":"Nasdaq","CBOE":"Cboe","FDS":"FactSet","MORN":"Morningstar",
+    "TW":"Tradeweb","VIRT":"Virtu Financial",
+    "TGT":"Target","DG":"Dollar General","DLTR":"Dollar Tree","BJ":"BJ's Wholesale","KR":"Kroger",
+    "ROST":"Ross Stores","TJX":"TJX","BURL":"Burlington","FIVE":"Five Below","OLLI":"Ollie's",
+    "ETSY":"Etsy","EBAY":"eBay","W":"Wayfair","CHWY":"Chewy","CVNA":"Carvana",
+    "MELI":"MercadoLibre","SE":"Sea Limited","CPNG":"Coupang","BABA":"Alibaba","PDD":"PDD",
+    "JD":"JD.com","GLBE":"Global-E",
+    "MDLZ":"Mondelez","GIS":"General Mills","HSY":"Hershey","KHC":"Kraft Heinz","CAG":"Conagra",
+    "CPB":"Campbell's","SJM":"Smucker","MNST":"Monster Beverage","CELH":"Celsius",
+    "KDP":"Keurig Dr Pepper","K":"Kellanova","TSN":"Tyson Foods","HRL":"Hormel",
+    "CMG":"Chipotle","YUM":"Yum Brands","QSR":"Restaurant Brands","DPZ":"Domino's",
+    "WING":"Wingstop","SHAK":"Shake Shack","TXRH":"Texas Roadhouse","DRI":"Darden","CAVA":"CAVA",
+    "EAT":"Brinker",
+    "LULU":"Lululemon","DECK":"Deckers","ONON":"On Holding","SKX":"Skechers","VFC":"VF Corp",
+    "RL":"Ralph Lauren","PVH":"PVH","ANF":"Abercrombie","UAA":"Under Armour","CROX":"Crocs",
+    "BIRK":"Birkenstock","GAP":"Gap",
+    "EL":"Estee Lauder","ULTA":"Ulta Beauty","COTY":"Coty","ELF":"e.l.f. Beauty","IPAR":"Interparfums",
+    "CL":"Colgate","KMB":"Kimberly-Clark","CHD":"Church & Dwight","CLX":"Clorox",
+    "EPC":"Edgewell","REYN":"Reynolds",
+    "PM":"Philip Morris","MO":"Altria","BTI":"British American Tobacco","STZ":"Constellation Brands",
+    "DEO":"Diageo","TAP":"Molson Coors","SAM":"Boston Beer","BF-B":"Brown-Forman",
+    "DAL":"Delta","UAL":"United Airlines","AAL":"American Airlines","LUV":"Southwest",
+    "ALK":"Alaska Air","BKNG":"Booking","EXPE":"Expedia","MAR":"Marriott","HLT":"Hilton",
+    "H":"Hyatt","RCL":"Royal Caribbean","CCL":"Carnival","NCLH":"Norwegian Cruise","TRIP":"TripAdvisor",
+    "FRPT":"Freshpet","ELAN":"Elanco","TRUP":"Trupanion","WOOF":"Petco","IDXX":"IDEXX",
+    "WBD":"Warner Bros Discovery","PARA":"Paramount","ROKU":"Roku","SPOT":"Spotify",
+    "FUBO":"fuboTV","LYV":"Live Nation",
+    "EA":"Electronic Arts","TTWO":"Take-Two","RBLX":"Roblox","U":"Unity","PLTK":"Playtika",
+    "APP":"AppLovin","GRVY":"Gravity","SKLZ":"Skillz",
+    "DKNG":"DraftKings","PENN":"PENN Entertainment","CZR":"Caesars","MGM":"MGM Resorts",
+    "LVS":"Las Vegas Sands","WYNN":"Wynn Resorts","BYD":"Boyd Gaming","CHDN":"Churchill Downs",
+    "FLUT":"Flutter","RSI":"Rush Street",
+    "TTD":"The Trade Desk","PINS":"Pinterest","SNAP":"Snap","RDDT":"Reddit","OMC":"Omnicom",
+    "IPG":"Interpublic","MGNI":"Magnite","CRTO":"Criteo","DV":"DoubleVerify","ZETA":"Zeta Global",
+    "IAS":"Integral Ad Science","MTCH":"Match Group","BMBL":"Bumble","NXST":"Nexstar",
+    "GD":"General Dynamics","LHX":"L3Harris","HII":"Huntington Ingalls","TXT":"Textron",
+    "HWM":"Howmet","TDG":"TransDigm","AXON":"Axon","KTOS":"Kratos","AVAV":"AeroVironment",
+    "LDOS":"Leidos","BAH":"Booz Allen","CACI":"CACI","SAIC":"SAIC","RCAT":"Red Cat",
+    "RKLB":"Rocket Lab","LUNR":"Intuitive Machines","ASTS":"AST SpaceMobile","PL":"Planet Labs",
+    "RDW":"Redwire","IRDM":"Iridium","VSAT":"Viasat","GSAT":"Globalstar","SPCE":"Virgin Galactic",
+    "MNTS":"Momentus","ERJ":"Embraer","SPR":"Spirit AeroSystems","HEI":"HEICO",
+    "CW":"Curtiss-Wright","MOG-A":"Moog",
+    "CMI":"Cummins","PCAR":"PACCAR","AGCO":"AGCO","TEX":"Terex","OSK":"Oshkosh",
+    "URI":"United Rentals","HRI":"Herc Holdings","ALG":"Alamo Group","MTW":"Manitowoc",
+    "ROK":"Rockwell Automation","ABB":"ABB","SYM":"Symbotic","NDSN":"Nordson","ZBRA":"Zebra Tech",
+    "CGNX":"Cognex","MIDD":"Middleby","AME":"AMETEK","PH":"Parker Hannifin","DOV":"Dover",
+    "ITW":"Illinois Tool Works","IR":"Ingersoll Rand","GGG":"Graco",
+    "EME":"EMCOR","MTZ":"MasTec","ACM":"AECOM","J":"Jacobs","FLR":"Fluor","DY":"Dycom",
+    "GVA":"Granite Construction","STRL":"Sterling Infrastructure","ROAD":"Construction Partners",
+    "IESC":"IES Holdings","PRIM":"Primoris",
+    "DHI":"D.R. Horton","LEN":"Lennar","PHM":"PulteGroup","NVR":"NVR","TOL":"Toll Brothers",
+    "KBH":"KB Home","TMHC":"Taylor Morrison","MTH":"Meritage Homes","MHO":"M/I Homes",
+    "BLDR":"Builders FirstSource","POOL":"Pool Corp","IBP":"Installed Building Products",
+    "UNP":"Union Pacific","CSX":"CSX","NSC":"Norfolk Southern","CP":"Canadian Pacific","CNI":"Canadian National",
+    "XPO":"XPO","ODFL":"Old Dominion","SAIA":"Saia","CHRW":"C.H. Robinson","EXPD":"Expeditors",
+    "GXO":"GXO Logistics","JBHT":"J.B. Hunt","KNX":"Knight-Swift","RXO":"RXO",
+    "ZIM":"ZIM Shipping","MATX":"Matson","SBLK":"Star Bulk","GNK":"Genco Shipping",
+    "EGLE":"Eagle Bulk","GOGL":"Golden Ocean","DAC":"Danaos","GSL":"Global Ship Lease",
+    "KEX":"Kirby","TNK":"Teekay Tankers","FRO":"Frontline","DHT":"DHT Holdings",
+    "INSW":"International Seaways","STNG":"Scorpio Tankers",
+    "DDD":"3D Systems","SSYS":"Stratasys","MKFG":"Markforged","VJET":"voxeljet",
+    "XMTR":"Xometry","PRLB":"Proto Labs",
+    "COP":"ConocoPhillips","OXY":"Occidental","EOG":"EOG Resources","PSX":"Phillips 66",
+    "VLO":"Valero","MPC":"Marathon Petroleum","HES":"Hess","DVN":"Devon Energy",
+    "FANG":"Diamondback","PR":"Permian Resources","CTRA":"Coterra","APA":"APA Corp",
+    "SLB":"SLB","HAL":"Halliburton","BKR":"Baker Hughes","NOV":"NOV Inc","CHX":"ChampionX",
+    "WFRD":"Weatherford","TDW":"Tidewater","RIG":"Transocean","VAL":"Valaris",
+    "LNG":"Cheniere Energy","ET":"Energy Transfer","EPD":"Enterprise Products","KMI":"Kinder Morgan",
+    "WMB":"Williams","OKE":"ONEOK","TRGP":"Targa Resources","MPLX":"MPLX","PAA":"Plains All American",
+    "DTM":"DT Midstream","NEXT":"NextDecade","GLNG":"Golar LNG",
+    "NEM":"Newmont","GOLD":"Barrick","AEM":"Agnico Eagle","KGC":"Kinross Gold","AU":"AngloGold",
+    "HMY":"Harmony Gold","GFI":"Gold Fields","WPM":"Wheaton Precious","FNV":"Franco-Nevada",
+    "RGLD":"Royal Gold","BTG":"B2Gold","EGO":"Eldorado Gold","IAG":"IAMGOLD","CDE":"Coeur Mining",
+    "HL":"Hecla Mining","AG":"First Majestic","PAAS":"Pan American Silver",
+    "FCX":"Freeport-McMoRan","SCCO":"Southern Copper","TECK":"Teck Resources","RIO":"Rio Tinto",
+    "BHP":"BHP","VALE":"Vale","AA":"Alcoa","CENX":"Century Aluminum","ATI":"ATI Inc",
+    "CRS":"Carpenter Tech","HAYN":"Haynes International",
+    "NUE":"Nucor","STLD":"Steel Dynamics","CLF":"Cleveland-Cliffs","X":"US Steel",
+    "RS":"Reliance Steel","CMC":"Commercial Metals","MT":"ArcelorMittal","TX":"Ternium","ZEUS":"Olympic Steel",
+    "LIN":"Linde","APD":"Air Products","SHW":"Sherwin-Williams","ECL":"Ecolab","DD":"DuPont",
+    "DOW":"Dow","LYB":"LyondellBasell","PPG":"PPG","EMN":"Eastman Chemical","CE":"Celanese",
+    "FMC":"FMC Corp","IFF":"IFF","ASH":"Ashland","OLN":"Olin","WLK":"Westlake",
+    "WY":"Weyerhaeuser","PCH":"PotlatchDeltic","RYN":"Rayonier","LPX":"Louisiana-Pacific",
+    "BCC":"Boise Cascade","UFPI":"UFP Industries","MLM":"Martin Marietta","VMC":"Vulcan Materials",
+    "EXP":"Eagle Materials","SUM":"Summit Materials","CX":"Cemex","JHX":"James Hardie",
+    "ADM":"Archer-Daniels","BG":"Bunge","CTVA":"Corteva","MOS":"Mosaic","CF":"CF Industries",
+    "NTR":"Nutrien","DAR":"Darling Ingredients","LW":"Lamb Weston","INGR":"Ingredion","ANDE":"Andersons",
+    "EQIX":"Equinix","DLR":"Digital Realty","IRM":"Iron Mountain","AMT":"American Tower",
+    "CCI":"Crown Castle","SBAC":"SBA Communications","UNIT":"Uniti Group",
+    "PLD":"Prologis","EXR":"Extra Space","PSA":"Public Storage","CUBE":"CubeSmart",
+    "STAG":"STAG Industrial","FR":"First Industrial","EGP":"EastGroup","TRNO":"Terreno",
+    "REXR":"Rexford Industrial","SPG":"Simon Property","O":"Realty Income","KIM":"Kimco",
+    "REG":"Regency Centers","FRT":"Federal Realty","BRX":"Brixmor","NNN":"NNN REIT",
+    "ADC":"Agree Realty","MAC":"Macerich",
+    "AVB":"AvalonBay","EQR":"Equity Residential","MAA":"Mid-America","ESS":"Essex Property",
+    "UDR":"UDR","CPT":"Camden Property","INVH":"Invitation Homes","AMH":"American Homes 4 Rent",
+    "ELS":"Equity Lifestyle","SUI":"Sun Communities",
+    "WELL":"Welltower","VTR":"Ventas","OHI":"Omega Healthcare","DOC":"Healthpeak",
+    "CTRE":"CareTrust","SBRA":"Sabra Health","NHI":"National Health Investors",
+    "BXP":"BXP","VNO":"Vornado","SLG":"SL Green","HST":"Host Hotels","RHP":"Ryman Hospitality",
+    "PK":"Park Hotels","APLE":"Apple Hospitality","DRH":"DiamondRock",
+    "LUMN":"Lumen","CHTR":"Charter Communications","CABO":"Cable One","FYBR":"Frontier Comm",
+    "PAYX":"Paychex","PAYC":"Paycom","PCTY":"Paylocity","RHI":"Robert Half","MAN":"ManpowerGroup",
+    "KFY":"Korn Ferry","CBZ":"CBIZ","TNET":"TriNet",
+    "CHGG":"Chegg","COUR":"Coursera","UDMY":"Udemy","LRN":"Stride","ATGE":"Adtalem",
+    "LOPE":"Grand Canyon Education","STRA":"Strategic Education","PRDO":"Perdoceo",
+    "TLRY":"Tilray","CGC":"Canopy Growth","CRON":"Cronos","ACB":"Aurora Cannabis",
+    "SNDL":"SNDL","GRWG":"GrowGeneration",
+    # S&P 대형주 (기존 NAMES 미등록분)
+    "ABBV":"AbbVie","ABNB":"Airbnb","ABT":"Abbott","ACN":"Accenture","ADBE":"Adobe",
+    "ADI":"Analog Devices","ADP":"ADP","AMAT":"Applied Materials","AMGN":"Amgen",
+    "APH":"Amphenol","AXP":"American Express","BA":"Boeing","BAC":"Bank of America",
+    "BLK":"BlackRock","BMY":"Bristol Myers","BRK-B":"Berkshire Hathaway","BSX":"Boston Scientific",
+    "C":"Citigroup","CAT":"Caterpillar","CDNS":"Cadence","CI":"Cigna","CMCSA":"Comcast",
+    "CME":"CME Group","CSCO":"Cisco","CVX":"Chevron","D":"Dominion Energy","DDOG":"Datadog",
+    "DE":"Deere","DELL":"Dell","DHR":"Danaher","DIS":"Disney","DUK":"Duke Energy",
+    "DXCM":"DexCom","FDX":"FedEx","FTNT":"Fortinet","GILD":"Gilead","GS":"Goldman Sachs",
+    "HON":"Honeywell","HYSR":"SunHydrogen","IBM":"IBM","ICE":"ICE","INTC":"Intel",
+    "INTU":"Intuit","ISRG":"Intuitive Surgical","JNJ":"Johnson & Johnson","KLAC":"KLA Corp",
+    "KO":"Coca-Cola","LMT":"Lockheed Martin","LRCX":"Lam Research","MCD":"McDonald's",
+    "MCHP":"Microchip","MCO":"Moody's","MRK":"Merck","MRNA":"Moderna","MRVL":"Marvell",
+    "MS":"Morgan Stanley","MSCI":"MSCI","NEE":"NextEra Energy","NEP":"NextEra Partners",
+    "NKE":"Nike","NOC":"Northrop Grumman","NXPI":"NXP Semiconductors","ON":"onsemi",
+    "PEP":"PepsiCo","PFE":"Pfizer","PG":"Procter & Gamble","QCOM":"Qualcomm",
+    "REGN":"Regeneron","RTX":"RTX","SBUX":"Starbucks","SCHW":"Charles Schwab",
+    "SHOP":"Shopify","SNOW":"Snowflake","SNPS":"Synopsys","SO":"Southern Company",
+    "SPGI":"S&P Global","SYK":"Stryker","T":"AT&T","TMO":"Thermo Fisher","TMUS":"T-Mobile",
+    "TXN":"Texas Instruments","UBER":"Uber","UPS":"UPS","VRTX":"Vertex Pharma","VZ":"Verizon",
+    "WFC":"Wells Fargo","WMT":"Walmart","XOM":"Exxon Mobil","ZTS":"Zoetis",
 }
 
 
@@ -633,6 +965,8 @@ def get_name(sym):
     """종목명 반환."""
     if sym in NAMES:
         return NAMES[sym]
+    if sym in THEME_NAMES:
+        return THEME_NAMES[sym]
     return sym.replace(".KS", "").replace(".KQ", "")
 
 
@@ -2015,6 +2349,260 @@ def run_kr_highs(output=None):
     return filepath
 
 
+def _dw(s):
+    """문자열 표시 폭. 한글/전각/이모지는 2칸으로 계산."""
+    return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in str(s))
+
+
+def _pad(s, width, align="left"):
+    """표시 폭 기준 패딩 (한글 정렬용)."""
+    s = str(s)
+    gap = max(0, width - _dw(s))
+    return (" " * gap + s) if align == "right" else (s + " " * gap)
+
+
+def _series(raw, sym, field):
+    """batch download 결과에서 (sym, field) 시계열 추출."""
+    try:
+        if isinstance(raw.columns, pd.MultiIndex):
+            return raw[(sym, field)].dropna()
+        return raw[field].dropna()
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def scan_theme_universe(tickers, chunk_size=80):
+    """테마 종목 일괄 스캔. OHLCV만 사용해서 .info 호출 없이 빠르게 처리."""
+    uniq = sorted(set(tickers))
+    print(f"  [테마] {len(uniq)}개 종목 스캔 중...", file=sys.stderr)
+    rows = []
+
+    for start in range(0, len(uniq), chunk_size):
+        chunk = uniq[start:start + chunk_size]
+        raw = None
+        for attempt in range(3):
+            try:
+                raw = yf.download(chunk, period="1y", interval="1d", group_by="ticker",
+                                  progress=False, threads=True, auto_adjust=False)
+                if raw is not None and not raw.empty:
+                    break
+            except Exception:
+                pass
+            time.sleep(2 * (attempt + 1))
+        if raw is None or raw.empty:
+            print(f"  ... {start+1}-{start+len(chunk)} 실패 (스킵)", file=sys.stderr)
+            continue
+
+        for sym in chunk:
+            try:
+                closes = _series(raw, sym, "Close")
+                highs = _series(raw, sym, "High")
+                vols = _series(raw, sym, "Volume")
+                if len(closes) < 30:
+                    continue
+
+                price = float(closes.iloc[-1])
+                prev = float(closes.iloc[-2])
+                if price <= 0 or prev <= 0:
+                    continue
+                chg = (price / prev - 1) * 100
+
+                c5 = float(closes.iloc[-6]) if len(closes) >= 6 else prev
+                c20 = float(closes.iloc[-21]) if len(closes) >= 21 else float(closes.iloc[0])
+                chg_5d = (price / c5 - 1) * 100 if c5 > 0 else 0
+                chg_20d = (price / c20 - 1) * 100 if c20 > 0 else 0
+
+                h52 = float(highs.max()) if len(highs) else price
+                pct_h = (price / h52 * 100) if h52 > 0 else 0
+
+                if len(vols) >= 21:
+                    avg_v = float(vols.iloc[-21:-1].mean())
+                    vol_r = float(vols.iloc[-1]) / avg_v if avg_v > 0 else 1.0
+                else:
+                    vol_r = 1.0
+
+                rows.append(dict(sym=sym, price=price, chg=chg, chg_5d=chg_5d,
+                                 chg_20d=chg_20d, h52=h52, pct_h=pct_h, vol_r=vol_r))
+            except Exception:
+                continue
+
+        print(f"  ... {min(start+chunk_size, len(uniq))}/{len(uniq)}", file=sys.stderr)
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.set_index("sym")
+    print(f"  [테마] {len(df)}개 종목 데이터 확보", file=sys.stderr)
+    return df
+
+
+def generate_theme_report(data):
+    """테마별 관심종목 탭 보고서 생성."""
+    buf = StringIO()
+    now = datetime.now()
+
+    def w(text=""):
+        buf.write(text + "\n")
+
+    w("=" * 78)
+    w("  미장 테마별 관심종목")
+    w(f"  {now.strftime('%Y년 %m월 %d일 %H:%M')} 기준 (장마감)")
+    w("=" * 78)
+    w()
+
+    if data.empty:
+        w("  데이터를 가져오지 못했습니다.")
+        return buf.getvalue()
+
+    # 테마별 집계
+    stats = {}
+    for theme, syms in US_THEMES.items():
+        have = [s for s in syms if s in data.index]
+        if not have:
+            continue
+        sub = data.loc[have]
+        stats[theme] = dict(
+            avg=sub["chg"].mean(),
+            avg_5d=sub["chg_5d"].mean(),
+            avg_20d=sub["chg_20d"].mean(),
+            up=int((sub["chg"] > 0).sum()),
+            n=len(sub),
+            near_high=int((sub["pct_h"] >= 97).sum()),
+            leader=sub["chg"].idxmax(),
+            leader_chg=sub["chg"].max(),
+        )
+
+    if not stats:
+        w("  테마 데이터 없음.")
+        return buf.getvalue()
+
+    ranked = sorted(stats.items(), key=lambda kv: kv[1]["avg"], reverse=True)
+
+    def box(title):
+        w("┌" + "─" * 76 + "┐")
+        w("│  " + _pad(title, 74) + "│")
+        w("└" + "─" * 76 + "┘")
+
+    def rank_header(with_leader=True):
+        head = ("  " + _pad("순위", 4, "right") + "  " + _pad("테마", 20)
+                + _pad("당일", 8, "right") + _pad("5일", 9, "right")
+                + _pad("20일", 9, "right") + "  " + _pad("상승", 7, "right"))
+        if with_leader:
+            head += "  주도주"
+        w(head)
+        w("  " + "─" * 74)
+
+    def rank_row(i, theme, s, with_leader=True):
+        row = ("  " + _pad(i, 4, "right") + "  " + _pad(theme, 20)
+               + _pad(f"{s['avg']:+.2f}%", 8, "right")
+               + _pad(f"{s['avg_5d']:+.2f}%", 9, "right")
+               + _pad(f"{s['avg_20d']:+.2f}%", 9, "right")
+               + "  " + _pad(f"{s['up']}/{s['n']}", 7, "right"))
+        if with_leader:
+            row += f"  {get_name(s['leader'])} ({s['leader_chg']:+.1f}%)"
+        w(row)
+
+    # ─── 테마 순위 요약 ───
+    box("오늘 강세 테마 TOP 15")
+    rank_header()
+    for i, (theme, s) in enumerate(ranked[:15], 1):
+        rank_row(i, theme, s)
+    w()
+
+    box("오늘 약세 테마 TOP 10")
+    rank_header(with_leader=False)
+    for i, (theme, s) in enumerate(reversed(ranked[-10:]), 1):
+        rank_row(i, theme, s, with_leader=False)
+    w()
+
+    # ─── 신고가권 종목 (테마 무관 전체) ───
+    near = data[data["pct_h"] >= 98].sort_values("pct_h", ascending=False)
+    if not near.empty:
+        sym_theme = {}
+        for theme, syms in US_THEMES.items():
+            for s in syms:
+                sym_theme.setdefault(s, theme)
+        box(f"52주 신고가권 종목 {len(near)}개 (고가대비 98% 이상)")
+        for sym, r in near.iterrows():
+            w("    " + _pad(sym, 7) + _pad(get_name(sym), 25)
+              + _pad(f"${r['price']:,.2f}", 11, "right")
+              + _pad(f"{r['chg']:+.2f}%", 9, "right")
+              + f"   52H {r['pct_h']:>5.1f}%   [{sym_theme.get(sym, '-')}]")
+        w()
+
+    # ─── 대분류 → 테마 탭 ───
+    for group, themes in THEME_GROUPS.items():
+        present = [t for t in themes if t in stats]
+        if not present:
+            continue
+        present.sort(key=lambda t: stats[t]["avg"], reverse=True)
+
+        w()
+        w("=" * 78)
+        w(f"  ▓▓  {group}  ▓▓")
+        w("=" * 78)
+
+        for theme in present:
+            s = stats[theme]
+            syms = [x for x in US_THEMES[theme] if x in data.index]
+            sub = data.loc[syms].sort_values("chg", ascending=False)
+
+            label = f"┌─[ {theme} ]"
+            label += "─" * max(2, 42 - _dw(label))
+            tail = f" 평균 {s['avg']:+.2f}%  |  상승 {s['up']}/{s['n']}"
+            if s["near_high"]:
+                tail += f"  |  신고가권 {s['near_high']}"
+            w()
+            w("  " + label + tail)
+
+            for sym, r in sub.iterrows():
+                mark = "★" if r["pct_h"] >= 98 else "◆" if r["pct_h"] >= 95 else " "
+                vol_mark = "*" if r["vol_r"] >= 2.0 else " "
+                w("  │ " + _pad(sym, 7) + _pad(get_name(sym), 23)
+                  + _pad(f"${r['price']:,.2f}", 11, "right")
+                  + _pad(f"{r['chg']:+.2f}%", 9, "right")
+                  + f"  52H {r['pct_h']:>5.1f}% {mark}{vol_mark}")
+            w("  └" + "─" * 74)
+
+    w()
+    w("=" * 78)
+    w("  표기 안내")
+    w("=" * 78)
+    w("    ★  52주 고가 대비 98% 이상 (신고가권)")
+    w("    ◆  52주 고가 대비 95% 이상 (고가 근접)")
+    w("    *  거래량 20일 평균 대비 2배 이상 (수급 급증)")
+    w()
+    w("  각 테마의 '평균'은 소속 종목 등락률의 단순 평균입니다.")
+    w("  테마 탭은 그룹 내에서 당일 성과가 좋은 순서로 정렬됩니다.")
+    w()
+    w("-" * 78)
+    w("  주의: 본 보고서는 데이터 기반 자동 생성이며 투자 권유가 아닙니다.")
+    w("-" * 78)
+    w(f"  보고서 생성: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    w()
+
+    return buf.getvalue()
+
+
+def run_themes(output=None):
+    """테마별 관심종목 보고서 실행."""
+    all_syms = [s for syms in US_THEMES.values() for s in syms]
+    data = scan_theme_universe(all_syms)
+    report = generate_theme_report(data)
+
+    print(report)
+
+    if output:
+        filepath = output
+    else:
+        filepath = f"themes_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(report)
+    print(f"  보고서 저장: {filepath}", file=sys.stderr)
+
+    return filepath
+
+
 def run_report(market="ALL", output=None, chart=True):
     """보고서 실행."""
     jobs = []
@@ -2063,10 +2651,14 @@ def main():
                         help="롱베이스 돌파 + 첫 HTF 스캔 (나스닥)")
     parser.add_argument("--kr-highs", action="store_true",
                         help="국장 거래대금 TOP100 x 52주 신고가 스캔 (전체 시장)")
+    parser.add_argument("--themes", action="store_true",
+                        help="미장 테마별 관심종목 보고서 (디램/CPU/원자력 등 세부 테마)")
     parser.add_argument("--no-chart", action="store_true",
                         help="차트 생성 비활성화")
     args = parser.parse_args()
-    if args.kr_highs:
+    if args.themes:
+        run_themes(output=args.output)
+    elif args.kr_highs:
         run_kr_highs(output=args.output)
     elif args.minervini:
         run_minervini(output=args.output)

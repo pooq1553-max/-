@@ -49,7 +49,7 @@ jobs:
           if [ "${{ env.MARKET }}" = "KR" ]; then
             echo "SUBJECT=[국장] 거래대금 TOP100 신고가 - ${{ env.TODAY }}" >> $GITHUB_ENV
           elif [ "${{ env.MARKET }}" = "US" ]; then
-            echo "SUBJECT=[미장] 신고가 + 미너비니 + 롱베이스 - ${{ env.TODAY }}" >> $GITHUB_ENV
+            echo "SUBJECT=[미장] 신고가 + 테마별 관심종목 + 미너비니 - ${{ env.TODAY }}" >> $GITHUB_ENV
           else
             echo "SUBJECT=[투자] 종합 보고서 - ${{ env.TODAY }}" >> $GITHUB_ENV
           fi
@@ -82,17 +82,27 @@ jobs:
 
       - name: Generate Stage 2 base-consolidation scan (US only)
         if: env.MARKET == 'US' || env.MARKET == 'ALL'
+        continue-on-error: true
         run: |
           python3 stage2_scan.py \
             --out-dir reports \
             --txt stage2_${{ env.TODAY }}.txt \
             --png stage2_${{ env.TODAY }}.png
 
+      - name: Generate theme watchlist tabs (US only)
+        if: env.MARKET == 'US' || env.MARKET == 'ALL'
+        continue-on-error: true
+        run: |
+          mkdir -p reports
+          python3 stock_report.py --themes \
+            --output reports/themes_${{ env.TODAY }}.txt
+
       - name: Collect attachments
         run: |
           FILES=""
           for f in reports/kr_highs_${{ env.TODAY }}.txt \
                    reports/report_US_${{ env.TODAY }}.txt \
+                   reports/themes_${{ env.TODAY }}.txt \
                    reports/minervini_${{ env.TODAY }}.txt \
                    reports/longbase_${{ env.TODAY }}.txt \
                    reports/stage2_${{ env.TODAY }}.txt \
@@ -117,7 +127,11 @@ jobs:
             ${{ env.MARKET }} 시장 장마감 후 보고서입니다.
 
             첨부:
-            - 52주 신고가 + 거래대금 보고서
+            - kr_highs: 국장 거래대금 TOP100 x 52주 신고가 (KR)
+            - themes: 테마별 관심종목 탭 (US, 87개 테마 / 816종목)
+              → 디램, CPU, GPU, 파운드리, 장비, 원자력, 태양광, 수소,
+                양자컴퓨팅, GLP-1비만, 우주, 크립토, 방산 등 세부 테마별 정리
+            - report_US: 52주 신고가 + 거래대금 보고서 (US)
             - 미너비니 SEPA 피봇바이 스캔 (US)
             - 롱베이스 돌파 스캔 (US)
             - Stage 2 + 베이스 다지기 스캔 (US, 나스닥100+S&P500)
