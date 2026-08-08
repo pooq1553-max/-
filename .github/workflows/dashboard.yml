@@ -1,0 +1,65 @@
+name: Theme Scanner Page
+
+on:
+  schedule:
+    # 미장 마감 후 (UTC 20:30 ≒ KST 새벽 6시)
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas
+
+      - name: Build page
+        run: |
+          mkdir -p _site
+          python3 build_dashboard.py -o _site/index.html
+
+      # Pages 설정이 안 켜져 있어도 실패로 남지 않게 한다.
+      # (설정을 켜는 순간부터 아래 두 단계가 성공하며 주소가 살아난다)
+      - name: Upload Pages artifact
+        id: upload
+        continue-on-error: true
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Report result
+        run: |
+          if [ "${{ steps.deploy.outcome }}" = "success" ]; then
+            echo "페이지 배포 완료: ${{ steps.deploy.outputs.page_url }}"
+          else
+            echo "GitHub Pages가 아직 켜져 있지 않습니다."
+            echo "아래 주소에서 Source를 'GitHub Actions'로 바꾸면 다음 실행부터 배포됩니다."
+            echo "  https://github.com/${{ github.repository }}/settings/pages"
+            echo "(메일 첨부로는 계속 정상 발송됩니다)"
+          fi
