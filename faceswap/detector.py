@@ -13,11 +13,20 @@ class DetectedFace:
     det_score: float
     embedding: np.ndarray
     raw: object
+    gender: int = -1  # 0 = 여성, 1 = 남성, -1 = 알 수 없음
 
     @property
     def area(self) -> float:
         x1, y1, x2, y2 = self.bbox
         return float(max(0.0, x2 - x1) * max(0.0, y2 - y1))
+
+    @property
+    def is_female(self) -> bool:
+        return self.gender == 0
+
+    @property
+    def is_male(self) -> bool:
+        return self.gender == 1
 
 
 class FaceDetector:
@@ -30,6 +39,21 @@ class FaceDetector:
         )
         self.app.prepare(ctx_id=0, det_size=(det_size, det_size))
 
+    @staticmethod
+    def _read_gender(f) -> int:
+        g = getattr(f, "gender", None)
+        if g is None:
+            sex = getattr(f, "sex", None)
+            if sex == "F":
+                return 0
+            if sex == "M":
+                return 1
+            return -1
+        try:
+            return int(g)
+        except (TypeError, ValueError):
+            return -1
+
     def detect(self, image_bgr: np.ndarray) -> List[DetectedFace]:
         faces = self.app.get(image_bgr)
         return [
@@ -39,9 +63,28 @@ class FaceDetector:
                 det_score=float(getattr(f, "det_score", 0.0)),
                 embedding=np.asarray(getattr(f, "normed_embedding", getattr(f, "embedding", None)), dtype=np.float32),
                 raw=f,
+                gender=self._read_gender(f),
             )
             for f in faces
         ]
+
+    def select_targets(self, faces: List[DetectedFace], mode: str = "largest") -> List[DetectedFace]:
+        """교체 대상 얼굴 목록 반환.
+
+        mode: largest(가장 큰 얼굴 하나) / all(모두) / female(여성) / male(남성)
+        """
+        if not faces:
+            return []
+        if mode == "largest":
+            best = max(faces, key=lambda f: f.area)
+            return [best]
+        if mode == "all":
+            return list(faces)
+        if mode == "female":
+            return [f for f in faces if f.is_female]
+        if mode == "male":
+            return [f for f in faces if f.is_male]
+        raise ValueError(f"unknown target mode: {mode}")
 
     def select(self, faces: List[DetectedFace], strategy: str = "largest", index: int = 0) -> Optional[DetectedFace]:
         if not faces:

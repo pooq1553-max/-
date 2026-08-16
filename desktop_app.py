@@ -104,6 +104,7 @@ class FaceSwapApp:
         self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
         self.v_running = False
         self.v_resolution = StringVar(value="원본 유지")
+        self.v_target_mode = StringVar(value="가장 큰 얼굴만")
         self._video_proc_start: float | None = None
 
         # download state
@@ -246,10 +247,18 @@ class FaceSwapApp:
 
         ctrl = Frame(parent, padx=8, pady=4)
         ctrl.pack(fill="x")
-        Checkbutton(
+        Label(ctrl, text="교체 대상:").pack(side="left")
+        ttk.Combobox(
             ctrl,
-            text="영상 속 모든 얼굴 교체 (기본: 프레임마다 가장 큰 얼굴만)",
-            variable=self.v_replace_all,
+            textvariable=self.v_target_mode,
+            values=["가장 큰 얼굴만", "모든 얼굴", "여성 얼굴만", "남성 얼굴만"],
+            state="readonly",
+            width=16,
+        ).pack(side="left", padx=(6, 0))
+        Label(
+            ctrl,
+            text="  (성별은 자동 추정이라 가끔 틀릴 수 있어요)",
+            fg="#666", font=("Segoe UI", 9),
         ).pack(side="left")
 
         res_row = Frame(parent, padx=8)
@@ -511,12 +520,15 @@ class FaceSwapApp:
             res_map = {"원본 유지": None, "720p (2배 빠름)": 720,
                        "540p (3~4배 빠름)": 540, "480p (5배 빠름)": 480}
             resize_height = res_map.get(self.v_resolution.get())
+            mode_map = {"가장 큰 얼굴만": "largest", "모든 얼굴": "all",
+                        "여성 얼굴만": "female", "남성 얼굴만": "male"}
+            target_mode = mode_map.get(self.v_target_mode.get(), "largest")
             swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,
                 target_video_path=self.v_target_path,
                 output_video_path=self.v_output_path,
-                replace_all=self.v_replace_all.get(),
+                target_mode=target_mode,
                 resize_height=resize_height,
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,

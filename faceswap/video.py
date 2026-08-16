@@ -193,10 +193,15 @@ def swap_video(
     target_video_path: str | Path,
     output_video_path: str | Path,
     replace_all: bool = False,
+    target_mode: Optional[str] = None,
     resize_height: Optional[int] = None,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Path:
+    # target_mode 우선: largest / all / female / male.
+    # 미지정 시 기존 replace_all 로 결정(all 또는 largest).
+    if target_mode is None:
+        target_mode = "all" if replace_all else "largest"
     src_img = _imread_unicode(source_image_path)
     src_faces = pipeline.detector.detect(src_img)
     if not src_faces:
@@ -250,11 +255,7 @@ def swap_video(
 
                 tgt_faces = pipeline.detector.detect(frame)
                 if tgt_faces:
-                    to_replace = (
-                        tgt_faces
-                        if replace_all
-                        else [pipeline.detector.select(tgt_faces, "largest")]
-                    )
+                    to_replace = pipeline.detector.select_targets(tgt_faces, target_mode)
                     for tf in to_replace:
                         frame = pipeline.swapper.swap(frame, tf, src_face)
 
