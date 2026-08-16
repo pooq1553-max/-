@@ -148,6 +148,8 @@ class FaceSwapApp:
         self.tr_duration_sec = 0.0
 
         self._build_ui()
+        self._tray_icon = None
+        self._setup_tray()
 
     # ------------------------------------------------------------ UI --------
     def _build_ui(self) -> None:
@@ -1203,6 +1205,57 @@ class FaceSwapApp:
         self.hl_status.set(f"완료 · {count}개 클립을 {self.hl_output_dir} 에 저장")
         messagebox.showinfo("하이라이트 완료",
             f"{count}개 클립 저장됨:\n\n{summary}\n\n폴더: {self.hl_output_dir}")
+
+    # ------------------------------------------------------------- system tray
+    def _setup_tray(self) -> None:
+        try:
+            import pystray
+            from PIL import Image as _PImage, ImageDraw
+        except Exception:
+            # pystray/pillow 없으면 트레이 기능 없이 일반 최소화로 동작
+            self._tray_icon = None
+            return
+
+        img = _PImage.new("RGB", (64, 64), "#1565c0")
+        d = ImageDraw.Draw(img)
+        d.ellipse((14, 12, 50, 48), fill="#ffd9b3")          # 얼굴
+        d.ellipse((24, 26, 30, 32), fill="#333")              # 왼눈
+        d.ellipse((37, 26, 43, 32), fill="#333")              # 오른눈
+        d.arc((26, 30, 41, 44), 10, 170, fill="#994d00", width=2)  # 입
+
+        menu = pystray.Menu(
+            pystray.MenuItem("열기", self._tray_show, default=True),
+            pystray.MenuItem("종료", self._tray_quit),
+        )
+        self._tray_icon = pystray.Icon("FaceSwap", img, "FaceSwap", menu)
+        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+
+        self.root.bind("<Unmap>", self._on_unmap)
+        self.root.protocol("WM_DELETE_WINDOW", self._tray_quit)
+
+    def _on_unmap(self, event) -> None:
+        # 최소화 버튼을 눌렀을 때만 트레이로 숨김 (자식 위젯 이벤트 무시)
+        if event.widget is self.root and self.root.state() == "iconic":
+            if self._tray_icon is not None:
+                self.root.withdraw()  # 작업표시줄에서도 사라지고 트레이에만 남음
+
+    def _tray_show(self, icon=None, item=None) -> None:
+        self.root.after(0, self._do_show)
+
+    def _do_show(self) -> None:
+        self.root.deiconify()
+        self.root.state("normal")
+        self.root.lift()
+        self.root.focus_force()
+
+    def _tray_quit(self, icon=None, item=None) -> None:
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+        self.root.after(0, self.root.destroy)
 
     def run(self) -> None:
         self.root.mainloop()

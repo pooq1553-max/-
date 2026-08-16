@@ -8,3 +8,4 @@ huggingface_hub>=0.19,<1.0
 imageio-ffmpeg>=0.5
 pillow>=10
 yt-dlp>=2024.8
+pystray>=0.19
