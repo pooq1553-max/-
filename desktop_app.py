@@ -59,6 +59,32 @@ DEFAULT_MODEL_PATH = Path(__file__).resolve().parent / "models" / "inswapper_128
 THUMB = 300
 
 
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+_ES_DISPLAY_REQUIRED = 0x00000002
+
+
+def _prevent_sleep(keep_display: bool = False) -> None:
+    """작업 중 시스템 절전을 막는다 (화면은 꺼져도 됨). Windows 전용, 실패 시 무시."""
+    flags = _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED
+    if keep_display:
+        flags |= _ES_DISPLAY_REQUIRED
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(flags)
+    except Exception:
+        pass
+
+
+def _allow_sleep() -> None:
+    """절전 억제 해제 (평소 동작으로 복귀)."""
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)
+    except Exception:
+        pass
+
+
 def _imread_unicode(path: str):
     with open(path, "rb") as f:
         data = np.frombuffer(f.read(), np.uint8)
@@ -526,6 +552,7 @@ class FaceSwapApp:
 
     def _video_worker(self) -> None:
         start = time.time()
+        _prevent_sleep()
         try:
             pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.v_status.set, s))
             res_map = {"원본 유지": None, "720p (2배 빠름)": 720,
@@ -548,6 +575,8 @@ class FaceSwapApp:
             self.root.after(0, self._on_video_done, None, elapsed)
         except Exception as e:
             self.root.after(0, self._on_video_done, str(e), None)
+        finally:
+            _allow_sleep()
 
     def _on_video_done(self, error, elapsed) -> None:
         self.v_running = False
@@ -1211,6 +1240,7 @@ class FaceSwapApp:
         threading.Thread(target=self._hl_worker, args=(n, length), daemon=True).start()
 
     def _hl_worker(self, num_clips: int, clip_len: int) -> None:
+        _prevent_sleep()
         try:
             pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.hl_status.set, s))
             self.root.after(0, self.hl_status.set, "하이라이트 분석 중...")
