@@ -105,6 +105,7 @@ class FaceSwapApp:
         self.v_running = False
         self.v_resolution = StringVar(value="원본 유지")
         self.v_target_mode = StringVar(value="가장 큰 얼굴만")
+        self.v_shutdown = BooleanVar(value=False)
         self._video_proc_start: float | None = None
 
         # download state
@@ -277,6 +278,14 @@ class FaceSwapApp:
             res_row,
             text="  결과 영상이 선택한 해상도로 저장됨. 낮을수록 빠르고 파일 작지만 화질 손해.",
             fg="#666", font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        sd_row = Frame(parent, padx=8)
+        sd_row.pack(fill="x", pady=(0, 4))
+        Checkbutton(
+            sd_row,
+            text="스왑 완료 후 컴퓨터 자동 종료 (완료 시 60초 카운트다운, 취소 가능)",
+            variable=self.v_shutdown,
         ).pack(side="left")
 
         btns = Frame(parent)
@@ -552,8 +561,45 @@ class FaceSwapApp:
         self.v_progress.config(value=100)
         m, s = divmod(int(elapsed), 60)
         self.v_status.set(f"완료 · 소요 {m}분 {s}초 · 저장 위치: {self.v_output_path}")
+        if self.v_shutdown.get():
+            self._start_shutdown_countdown()
+            return
         messagebox.showinfo("동영상 스왑 완료",
             f"저장됨:\n{self.v_output_path}\n\n소요 시간: {m}분 {s}초")
+
+    def _start_shutdown_countdown(self, seconds: int = 60) -> None:
+        """스왑 완료 후 컴퓨터 종료를 예약하고, 취소 가능한 안내창을 띄운다."""
+        import subprocess
+        try:
+            # 윈도우 종료 예약 (creationflags로 콘솔창 안 뜨게)
+            subprocess.run(
+                ["shutdown", "/s", "/t", str(seconds)],
+                check=True, capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as e:
+            messagebox.showwarning(
+                "자동 종료 실패",
+                f"종료 명령 실행에 실패했어요. 수동으로 꺼주세요.\n{e}",
+            )
+            return
+        self.v_status.set(f"완료 · {seconds}초 후 컴퓨터가 종료됩니다.")
+        cancel = messagebox.askyesno(
+            "자동 종료 예약됨",
+            f"스왑 완료. {seconds}초 후 컴퓨터가 종료됩니다.\n\n"
+            f"저장 위치:\n{self.v_output_path}\n\n"
+            "지금 종료를 취소할까요?\n(예=취소하고 계속 켜둠 / 아니오=예정대로 종료)",
+        )
+        if cancel:
+            try:
+                subprocess.run(
+                    ["shutdown", "/a"],
+                    check=False, capture_output=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                self.v_status.set("자동 종료 취소됨. 컴퓨터는 계속 켜져 있어요.")
+            except Exception:
+                pass
 
     # ---------------------------------------------------------- download UI
     def _build_download_tab(self, parent: Frame) -> None:
