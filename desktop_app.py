@@ -727,19 +727,23 @@ class FaceSwapApp:
 
     def _video_progress(self, done: int, total: int, msg: str) -> None:
         pct = (done / total * 100) if total > 0 else 0
-        # 실제 프레임 처리가 시작된 시점(첫 프레임)부터 재서 모델 로딩 시간 제외
         now = time.time()
-        if self._video_proc_start is None and done > 0:
+        # 시작 시각은 프레임 처리 직전에 잡아두므로(_video_worker) 첫 보고부터
+        # 경과 시간이 0보다 크다. 혹시 없으면 여기서 잡는 안전망만 둔다.
+        if self._video_proc_start is None:
             self._video_proc_start = now
 
         extra = ""
-        if self._video_proc_start is not None and done > 0 and total > 0:
-            elapsed = now - self._video_proc_start
-            fps = done / elapsed if elapsed > 0 else 0
-            remaining = total - done
-            if fps > 0:
-                eta = remaining / fps
-                extra = f" · 남은 시간 약 {self._fmt_eta(eta)} · {fps:.1f} 프레임/초"
+        if done > 0 and total > 0:
+            elapsed = max(now - self._video_proc_start, 1e-3)
+            fps = done / elapsed
+            remaining = max(total - done, 0)
+            eta = remaining / fps if fps > 0 else 0
+            if fps >= 1:
+                speed = f"{fps:.1f} 프레임/초"
+            else:
+                speed = f"프레임당 {1.0 / fps:.1f}초"
+            extra = f" · 남은 시간 약 {self._fmt_eta(eta)} · {speed}"
 
         text = f"{msg} · {pct:.1f}%{extra}"
         self.root.after(0, lambda: (self.v_progress.config(value=pct),
@@ -767,6 +771,9 @@ class FaceSwapApp:
                 enhancer = self._get_enhancer(
                     lambda s: self.root.after(0, self.v_status.set, s))
                 enhance_blend = self._STRENGTH_MAP.get(self.enhance_strength_v.get(), 0.8)
+
+            # 모델·정체성 준비가 모두 끝난 지금부터 재야 프레임 처리 속도가 정확하다
+            self._video_proc_start = time.time()
             swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,

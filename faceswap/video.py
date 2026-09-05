@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -246,6 +247,10 @@ def swap_video(
 
         frame_idx = 0
         need_resize = (out_width, out_height) != (src_width, src_height)
+        # 화질 개선을 켜면 프레임당 수 초가 걸린다. 프레임 수 기준으로 보고하면
+        # 갱신이 너무 뜸해지므로 경과 시간 기준으로 보고한다.
+        last_report = 0.0
+        report_interval = 0.5
         try:
             while True:
                 if cancel and cancel():
@@ -271,8 +276,14 @@ def swap_video(
 
                 writer.write(frame)
                 frame_idx += 1
-                if progress and (frame_idx % 2 == 0 or frame_idx == total_frames):
-                    progress(frame_idx, total_frames, f"프레임 처리 중 {frame_idx}/{total_frames}")
+                if progress:
+                    now = time.monotonic()
+                    if (now - last_report >= report_interval
+                            or frame_idx == 1
+                            or frame_idx == total_frames):
+                        last_report = now
+                        progress(frame_idx, total_frames,
+                                 f"프레임 처리 중 {frame_idx}/{total_frames}")
         finally:
             cap.release()
             writer.release()
