@@ -2,8 +2,11 @@ name: Theme Scanner Page
 
 on:
   schedule:
-    # 미장 마감 후 (UTC 20:30 ≒ KST 새벽 6시)
-    - cron: '30 20 * * 1-5'
+    # 미장 마감 16:00 ET → 16:40 ET 실행.
+    # 썸머타임(EDT)이면 20:40 UTC, 표준시(EST)면 21:40 UTC가 해당한다.
+    # 뉴욕 현지시각을 보고 한쪽만 실행한다.
+    - cron: '40 20 * * 1-5'
+    - cron: '40 21 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -16,7 +19,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 미장 마감 직후인지 판단한다 (크론은 UTC 고정이라 썸머타임을 못 따라간다).
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+    steps:
+      - name: Check US market close
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, sys
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          ny = datetime.now(ZoneInfo("America/New_York"))
+          close = ny.replace(hour=16, minute=0, second=0, microsecond=0)
+          mins = (ny - close).total_seconds() / 60
+
+          go = os.environ["EVENT_NAME"] == "workflow_dispatch" or 30 <= mins < 90
+          print(f"ET {ny:%m-%d %H:%M} {ny.tzname()} (마감+{mins:.0f}분) -> go={go}",
+                file=sys.stderr)
+          print(f"go={'true' if go else 'false'}")
+          PY
+
   publish:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

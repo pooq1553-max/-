@@ -2,8 +2,12 @@ name: Daily Stock Report
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5'
-    - cron: '30 20 * * 1-5'
+    # 국장 마감 15:30 KST → 15:50 KST 실행 → 메일 16:00 KST 전후
+    - cron: '50 6 * * 1-5'
+    # 미장 마감 16:00 ET → 16:40 ET 실행. 썸머타임(EDT)이면 아래 20:40 UTC가,
+    # 표준시(EST)면 21:40 UTC가 걸린다. 뉴욕 현지시각을 보고 한쪽만 실행한다.
+    - cron: '40 20 * * 1-5'
+    - cron: '40 21 * * 1-5'
   workflow_dispatch:
     inputs:
       market:
@@ -17,24 +21,67 @@ on:
           - ALL
 
 jobs:
-  generate-report:
+  # 지금이 어느 시장의 마감 직후인지 판단한다.
+  # 크론은 UTC 고정이라 미국 썸머타임을 못 따라가므로 여기서 걸러낸다.
+  gate:
     runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+      market: ${{ steps.decide.outputs.market }}
+      today: ${{ steps.decide.outputs.today }}
+    steps:
+      - name: Decide market
+        id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MARKET: ${{ inputs.market }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, sys
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          kr = datetime.now(ZoneInfo("Asia/Seoul"))
+          ny = datetime.now(ZoneInfo("America/New_York"))
+
+          def since_close(dt, h, m):
+              close = dt.replace(hour=h, minute=m, second=0, microsecond=0)
+              return (dt - close).total_seconds() / 60
+
+          kr_min = since_close(kr, 15, 30)   # 국장 마감
+          ny_min = since_close(ny, 16, 0)    # 미장 마감 (썸머타임 자동 반영)
+
+          if os.environ["EVENT_NAME"] == "workflow_dispatch":
+              go, market = True, (os.environ.get("INPUT_MARKET") or "ALL")
+          elif 0 <= kr_min < 60:
+              go, market = True, "KR"
+          elif 30 <= ny_min < 90:
+              go, market = True, "US"
+          else:
+              go, market = False, "SKIP"
+
+          today = (ny if market == "US" else kr).strftime("%Y%m%d")
+
+          print(f"KST {kr:%m-%d %H:%M} (마감+{kr_min:.0f}분) | "
+                f"ET {ny:%m-%d %H:%M} {ny.tzname()} (마감+{ny_min:.0f}분) "
+                f"-> market={market} go={go}", file=sys.stderr)
+
+          print(f"go={'true' if go else 'false'}")
+          print(f"market={market}")
+          print(f"today={today}")
+          PY
+
+  generate-report:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    env:
+      MARKET: ${{ needs.gate.outputs.market }}
+      TODAY: ${{ needs.gate.outputs.today }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set date and market
-        run: |
-          echo "TODAY=$(date +%Y%m%d)" >> $GITHUB_ENV
-          HOUR=$(date -u +%H)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "MARKET=${{ inputs.market }}" >> $GITHUB_ENV
-          elif [ "$HOUR" -lt 12 ]; then
-            echo "MARKET=KR" >> $GITHUB_ENV
-          else
-            echo "MARKET=US" >> $GITHUB_ENV
-          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -127,11 +174,11 @@ jobs:
 
             ■ 테마별 관심종목 보기
             첨부된 theme_scanner_${{ env.TODAY }}.html 파일을 눌러서 열어주세요.
-            탭으로 테마를 넘기고, 종목을 누르면 차트가 뜹니다.
+            탭으로 테마를 넘기고, 종목을 누르면 봉차트가 뜹니다.
             (인터넷 없이도 열립니다)
 
             첨부:
-            - theme_scanner (html): 87개 테마 / 816종목 탭 + 차트
+            - theme_scanner (html): 87개 테마 / 816종목 탭 + 봉차트
             - kr_highs: 국장 거래대금 TOP100 x 52주 신고가 (KR)
             - report_US: 52주 신고가 + 거래대금 보고서 (US)
             - 미너비니 SEPA 피봇바이 스캔 (US)
