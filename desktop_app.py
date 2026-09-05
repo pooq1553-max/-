@@ -92,6 +92,15 @@ def _allow_sleep() -> None:
         pass
 
 
+def _err_detail(e: Exception) -> str:
+    """에러 메시지에 발생 위치를 덧붙인다 (스크린샷 한 장으로 원인 파악 가능하게)."""
+    import traceback
+    tb = traceback.format_exc().strip()
+    lines = [ln for ln in tb.split("\n") if ln.strip()]
+    tail = "\n".join(lines[-6:])
+    return f"{e}\n\n--- 자세한 위치 ---\n{tail}"
+
+
 def _imread_unicode(path: str):
     with open(path, "rb") as f:
         data = np.frombuffer(f.read(), np.uint8)
@@ -614,7 +623,7 @@ class FaceSwapApp:
             self.result_bgr = result
             self.root.after(0, self._on_photo_done, result, None)
         except Exception as e:
-            self.root.after(0, self._on_photo_done, None, str(e))
+            self.root.after(0, self._on_photo_done, None, _err_detail(e))
 
     def _on_photo_done(self, result, error) -> None:
         self.progress.stop()
@@ -774,7 +783,7 @@ class FaceSwapApp:
             elapsed = time.time() - start
             self.root.after(0, self._on_video_done, None, elapsed)
         except Exception as e:
-            self.root.after(0, self._on_video_done, str(e), None)
+            self.root.after(0, self._on_video_done, _err_detail(e), None)
         finally:
             _allow_sleep()
 
@@ -1468,7 +1477,7 @@ class FaceSwapApp:
             )
             self.root.after(0, self._on_hl_done, None, len(paths), summary)
         except Exception as e:
-            self.root.after(0, self._on_hl_done, str(e), 0, "")
+            self.root.after(0, self._on_hl_done, _err_detail(e), 0, "")
 
     def _on_hl_done(self, error, count, summary) -> None:
         self.hl_start_btn.config(state="normal", text="분석 후 자동 저장")

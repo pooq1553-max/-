@@ -10,7 +10,6 @@ DeepFaceLab 류의 인물별 파인튜닝과는 다르며, 훨씬 가볍고 즉�
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
@@ -48,6 +47,42 @@ def _frontality(kps: np.ndarray) -> float:
     eye_mid_x = (left_eye[0] + right_eye[0]) / 2.0
     offset = abs(float(nose[0]) - eye_mid_x) / eye_dist
     return float(np.clip(1.0 - offset * 2.0, 0.0, 1.0))
+
+
+class AveragedFace:
+    """평균 임베딩을 담는 소스 얼굴 대체 객체.
+
+    inswapper는 소스 얼굴에서 normed_embedding 하나만 읽는다. insightface의
+    Face(dict 서브클래스)를 복사하면 버전마다 다른 내부 구현에 얽히고, 없는
+    속성이 None으로 조용히 반환되는 성질 때문에 문제를 늦게 발견하게 된다.
+    필요한 것만 직접 들고 있는 객체를 쓰는 편이 안전하다.
+    """
+
+    def __init__(self, embedding, kps=None, bbox=None, det_score: float = 1.0,
+                 gender: int = -1, age=None):
+        self.embedding = np.asarray(embedding, dtype=np.float32)
+        self.kps = kps
+        self.bbox = bbox
+        self.det_score = det_score
+        self.gender = gender
+        self.age = age
+
+    @property
+    def embedding_norm(self) -> float:
+        return float(np.linalg.norm(self.embedding))
+
+    @property
+    def normed_embedding(self) -> np.ndarray:
+        n = self.embedding_norm
+        return self.embedding / n if n > 1e-6 else self.embedding
+
+    @property
+    def sex(self):
+        if self.gender == 0:
+            return "F"
+        if self.gender == 1:
+            return "M"
+        return None
 
 
 @dataclass
@@ -168,19 +203,18 @@ def build_identity(
     report.used = [s.path for s in kept]
     report.similarities = [(s.path, s.similarity) for s in kept]
 
-    # 가장 대표적인(가중치 높은) 얼굴을 틀로 삼고 임베딩만 평균값으로 교체한다.
+    # 가장 대표적인(가중치 높은) 얼굴의 위치 정보를 쓰고 임베딩만 평균값으로 바꾼다.
     # inswapper는 source_face.normed_embedding 만 사용하므로 이걸로 충분하다.
     best = max(kept, key=lambda s: s.weight)
-    raw = copy.deepcopy(best.face.raw)
     scale = float(np.linalg.norm(best.face.embedding)) or 1.0
     merged_embedding = (mean_emb * scale).astype(np.float32)
-    try:
-        raw.embedding = merged_embedding
-    except Exception:
-        try:
-            raw["embedding"] = merged_embedding
-        except Exception as e:
-            raise RuntimeError(f"평균 임베딩을 적용하지 못했어요: {e}")
+    raw = AveragedFace(
+        merged_embedding,
+        kps=best.face.kps,
+        bbox=best.face.bbox,
+        det_score=best.face.det_score,
+        gender=best.face.gender,
+    )
 
     source_face = DetectedFace(
         bbox=best.face.bbox,
