@@ -195,6 +195,7 @@ def swap_video(
     replace_all: bool = False,
     target_mode: Optional[str] = None,
     resize_height: Optional[int] = None,
+    source_face=None,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Path:
@@ -202,11 +203,15 @@ def swap_video(
     # 미지정 시 기존 replace_all 로 결정(all 또는 largest).
     if target_mode is None:
         target_mode = "all" if replace_all else "largest"
-    src_img = _imread_unicode(source_image_path)
-    src_faces = pipeline.detector.detect(src_img)
-    if not src_faces:
-        raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
-    src_face = pipeline.detector.select(src_faces, "largest")
+    if source_face is not None:
+        # 여러 장에서 미리 만들어 둔 평균 정체성을 그대로 사용
+        src_face = source_face
+    else:
+        src_img = _imread_unicode(source_image_path)
+        src_faces = pipeline.detector.detect(src_img)
+        if not src_faces:
+            raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
+        src_face = pipeline.detector.select(src_faces, "largest")
 
     cap = cv2.VideoCapture(str(target_video_path))
     if not cap.isOpened():

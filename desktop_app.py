@@ -33,6 +33,7 @@ from tkinter import Listbox, END
 from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import concat_videos, probe_video, swap_video, trim_video
 from faceswap.highlights import find_highlights, extract_highlight_clips
+from faceswap.identity import build_identity
 
 
 def _parse_time(text: str) -> float:
@@ -112,9 +113,14 @@ class FaceSwapApp:
 
         self.pipeline: FaceSwapPipeline | None = None
         self._cancel = False
+        # 평균 정체성 캐시 (소스 사진 목록이 바뀌면 None으로 초기화)
+        self._identity_cache = None
+        self._v_identity_cache = None
 
         # photo state
         self.source_path: str | None = None
+        self.source_paths: list[str] = []
+        self.source_count_var = StringVar(value="")
         self.target_path: str | None = None
         self.result_bgr = None
         self.replace_all_photo = BooleanVar(value=False)
@@ -122,6 +128,8 @@ class FaceSwapApp:
 
         # video state
         self.v_source_path: str | None = None
+        self.v_source_paths: list[str] = []
+        self.v_source_count_var = StringVar(value="")
         self.v_target_path: str | None = None
         self.v_output_path: str | None = None
         self.v_replace_all = BooleanVar(value=False)
@@ -216,7 +224,11 @@ class FaceSwapApp:
         panels = Frame(parent, padx=8, pady=8)
         panels.pack(fill="both", expand=True)
 
-        self.src_canvas = self._make_panel(panels, "소스 (얼굴 가져올 사진)", self._pick_source, 0)
+        self.src_canvas = self._make_panel(
+            panels, "소스 (얼굴 가져올 사진)", self._pick_source, 0,
+            count_var=self.source_count_var,
+            hint="여러 장 선택 가능 (Ctrl+클릭)\n각도·표정이 다른 사진 3~6장이면 더 정확",
+        )
         self.tgt_canvas = self._make_panel(panels, "타깃 (얼굴 바꿀 사진)", self._pick_target, 1)
         self.res_canvas, self.save_btn = self._make_result_panel(panels, 2)
 
@@ -258,6 +270,10 @@ class FaceSwapApp:
                                     highlightthickness=1, highlightbackground="#ccc")
         self.v_src_canvas.pack(pady=6)
         Button(left, text="사진 선택...", command=self._v_pick_source, padx=12, pady=4).pack()
+        Label(left, textvariable=self.v_source_count_var, fg="#1565c0",
+              font=("Segoe UI", 9, "bold")).pack()
+        Label(left, text="여러 장 선택 가능 (Ctrl+클릭)\n각도·표정이 다른 사진 3~6장이면 더 정확",
+              fg="#888", font=("Segoe UI", 8), justify="center").pack()
 
         # right: video target + output
         right = Frame(top, padx=6, pady=6)
@@ -333,7 +349,8 @@ class FaceSwapApp:
         self.v_progress.pack(pady=6)
         Label(parent, textvariable=self.v_status, fg="#555").pack(pady=(2, 8))
 
-    def _make_panel(self, parent: Frame, title: str, pick_cb, col: int) -> Canvas:
+    def _make_panel(self, parent: Frame, title: str, pick_cb, col: int,
+                    count_var: StringVar | None = None, hint: str = "") -> Canvas:
         frame = Frame(parent, padx=6, pady=6)
         frame.grid(row=0, column=col, sticky="nsew")
         Label(frame, text=title, font=("Segoe UI", 11, "bold")).pack()
@@ -341,6 +358,12 @@ class FaceSwapApp:
                         highlightthickness=1, highlightbackground="#ccc")
         canvas.pack(pady=6)
         Button(frame, text="사진 선택...", command=pick_cb, padx=12, pady=4).pack()
+        if count_var is not None:
+            Label(frame, textvariable=count_var, fg="#1565c0",
+                  font=("Segoe UI", 9, "bold")).pack()
+        if hint:
+            Label(frame, text=hint, fg="#888", font=("Segoe UI", 8),
+                  justify="center").pack()
         return canvas
 
     def _make_result_panel(self, parent: Frame, col: int) -> tuple[Canvas, Button]:
@@ -365,11 +388,19 @@ class FaceSwapApp:
 
     # ------------------------------------------------------- photo helpers -
     def _pick_source(self) -> None:
-        path = filedialog.askopenfilename(title="소스 사진 선택",
+        paths = filedialog.askopenfilenames(
+            title="소스 사진 선택 (여러 장 고르면 더 정확해져요)",
             filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
-        if path:
-            self.source_path = path
-            self._show_file(self.src_canvas, path)
+        if not paths:
+            return
+        self.source_paths = list(paths)
+        self.source_path = self.source_paths[0]
+        self._identity_cache = None
+        self._show_file(self.src_canvas, self.source_path)
+        n = len(self.source_paths)
+        self.source_count_var.set(
+            f"{n}장 사용 (평균 정체성)" if n > 1 else "1장 사용"
+        )
 
     def _pick_target(self) -> None:
         path = filedialog.askopenfilename(title="타깃 사진 선택",
@@ -395,6 +426,44 @@ class FaceSwapApp:
         canvas.delete("all")
         canvas.create_image(THUMB // 2, THUMB // 2, image=photo, anchor="center")
 
+    def _get_identity(self, pipe, paths, cache_attr: str, status_setter):
+        """소스 사진 목록에서 평균 정체성을 만든다 (같은 목록이면 캐시 재사용)."""
+        paths = [p for p in (paths or []) if p]
+        if not paths:
+            raise RuntimeError("소스 사진을 선택하세요.")
+
+        cached = getattr(self, cache_attr, None)
+        if cached is not None and cached[0] == tuple(paths):
+            return cached[1]
+
+        if len(paths) == 1:
+            img = _imread_unicode(paths[0])
+            if img is None:
+                raise RuntimeError("소스 사진을 열 수 없어요.")
+            faces = pipe.detector.detect(img)
+            if not faces:
+                raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
+            face = pipe.detector.select(faces, "largest")
+        else:
+            status_setter(f"소스 {len(paths)}장 분석 중...")
+            face, report = build_identity(
+                pipe.detector, paths,
+                progress=lambda p, m: status_setter(m),
+            )
+            status_setter(report.summary_ko())
+            if report.skipped:
+                reasons = "\n".join(
+                    f"  · {Path(p).name}: {why}" for p, why in report.skipped[:6]
+                )
+                self.root.after(
+                    0, messagebox.showinfo, "일부 사진 제외됨",
+                    f"{len(report.skipped)}장을 제외하고 "
+                    f"{report.used_count}장으로 정체성을 만들었어요.\n\n{reasons}",
+                )
+
+        setattr(self, cache_attr, (tuple(paths), face))
+        return face
+
     def _run_photo_swap(self) -> None:
         if not self.source_path:
             messagebox.showwarning("사진 필요", "소스 사진(얼굴 가져올 사진)을 먼저 선택하세요.")
@@ -413,21 +482,19 @@ class FaceSwapApp:
             pipe = self._ensure_pipeline(lambda s: self.root.after(0, self.status_var.set, s))
 
             self.root.after(0, self.status_var.set, "얼굴 검출 중...")
-            src_img = _imread_unicode(self.source_path)
             tgt_img = _imread_unicode(self.target_path)
-            if src_img is None:
-                raise RuntimeError("소스 사진을 열 수 없어요.")
             if tgt_img is None:
                 raise RuntimeError("타깃 사진을 열 수 없어요.")
 
-            src_faces = pipe.detector.detect(src_img)
+            src_face = self._get_identity(
+                pipe, self.source_paths or [self.source_path],
+                cache_attr="_identity_cache",
+                status_setter=lambda s: self.root.after(0, self.status_var.set, s),
+            )
+
             tgt_faces = pipe.detector.detect(tgt_img)
-            if not src_faces:
-                raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
             if not tgt_faces:
                 raise RuntimeError("타깃 사진에서 얼굴을 찾지 못했어요.")
-
-            src_face = pipe.detector.select(src_faces, "largest")
             to_replace = (tgt_faces if self.replace_all_photo.get()
                           else [pipe.detector.select(tgt_faces, "largest")])
             self.root.after(0, self.status_var.set, f"스왑 중... ({len(to_replace)}개 얼굴)")
@@ -464,11 +531,19 @@ class FaceSwapApp:
 
     # -------------------------------------------------------- video handlers
     def _v_pick_source(self) -> None:
-        path = filedialog.askopenfilename(title="소스 사진 선택",
+        paths = filedialog.askopenfilenames(
+            title="소스 사진 선택 (여러 장 고르면 더 정확해져요)",
             filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
-        if path:
-            self.v_source_path = path
-            self._show_file(self.v_src_canvas, path)
+        if not paths:
+            return
+        self.v_source_paths = list(paths)
+        self.v_source_path = self.v_source_paths[0]
+        self._v_identity_cache = None
+        self._show_file(self.v_src_canvas, self.v_source_path)
+        n = len(self.v_source_paths)
+        self.v_source_count_var.set(
+            f"{n}장 사용 (평균 정체성)" if n > 1 else "1장 사용"
+        )
 
     def _v_pick_target(self) -> None:
         path = filedialog.askopenfilename(title="타깃 동영상 선택",
@@ -561,6 +636,11 @@ class FaceSwapApp:
             mode_map = {"가장 큰 얼굴만": "largest", "모든 얼굴": "all",
                         "여성 얼굴만": "female", "남성 얼굴만": "male"}
             target_mode = mode_map.get(self.v_target_mode.get(), "largest")
+            src_face = self._get_identity(
+                pipe, self.v_source_paths or [self.v_source_path],
+                cache_attr="_v_identity_cache",
+                status_setter=lambda s: self.root.after(0, self.v_status.set, s),
+            )
             swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,
@@ -568,6 +648,7 @@ class FaceSwapApp:
                 output_video_path=self.v_output_path,
                 target_mode=target_mode,
                 resize_height=resize_height,
+                source_face=src_face,
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,
             )
