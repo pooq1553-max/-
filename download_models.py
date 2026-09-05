@@ -95,9 +95,28 @@ def main() -> int:
         help="where to place downloaded models",
     )
     parser.add_argument("--no-verify", action="store_true", help="skip sha256 verification")
+    parser.add_argument(
+        "--enhancer",
+        action="store_true",
+        help="also download the GFPGAN face-enhancement model (~330MB)",
+    )
     args = parser.parse_args()
 
     fetch_swap_model(Path(args.models_dir), verify=not args.no_verify)
+
+    if args.enhancer:
+        from faceswap.enhance import download_enhancer
+
+        print("\ndownloading face enhancement model (GFPGAN)...")
+
+        def _prog(seen, total):
+            if total:
+                print(f"\r  {seen / 1e6:6.1f} / {total / 1e6:6.1f} MB", end="", flush=True)
+            else:
+                print(f"\r  {seen / 1e6:6.1f} MB", end="", flush=True)
+
+        path = download_enhancer(Path(args.models_dir), progress=_prog)
+        print(f"\nsaved {path}")
 
     print(
         "\nnote: InsightFace's detector weights (buffalo_l) are downloaded lazily "

@@ -34,6 +34,12 @@ from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import concat_videos, probe_video, swap_video, trim_video
 from faceswap.highlights import find_highlights, extract_highlight_clips
 from faceswap.identity import build_identity
+from faceswap.enhance import (
+    FaceEnhancer,
+    download_enhancer,
+    enhancer_model_path,
+    verify_enhancer_model,
+)
 
 
 def _parse_time(text: str) -> float:
@@ -116,6 +122,12 @@ class FaceSwapApp:
         # 평균 정체성 캐시 (소스 사진 목록이 바뀌면 None으로 초기화)
         self._identity_cache = None
         self._v_identity_cache = None
+        # 화질 개선 (GFPGAN ONNX) — 처음 켤 때 모델 로드
+        self.enhancer: FaceEnhancer | None = None
+        self.enhance_photo = BooleanVar(value=False)
+        self.enhance_video = BooleanVar(value=False)
+        self.enhance_strength = StringVar(value="보통")
+        self.enhance_strength_v = StringVar(value="보통")
 
         # photo state
         self.source_path: str | None = None
@@ -243,6 +255,24 @@ class FaceSwapApp:
             variable=self.replace_all_photo,
         ).pack(side="left")
 
+        enh = Frame(parent, padx=8)
+        enh.pack(fill="x", pady=(0, 4))
+        Checkbutton(
+            enh,
+            text="화질 개선 (스왑된 얼굴 선명하게)",
+            variable=self.enhance_photo,
+        ).pack(side="left")
+        Label(enh, text="강도:").pack(side="left", padx=(12, 0))
+        ttk.Combobox(
+            enh, textvariable=self.enhance_strength,
+            values=["약하게", "보통", "강하게"], state="readonly", width=8,
+        ).pack(side="left", padx=(6, 0))
+        Label(
+            enh,
+            text="  강할수록 선명하지만 과하면 인위적으로 보여요.",
+            fg="#666", font=("Segoe UI", 9),
+        ).pack(side="left")
+
         self.swap_btn = Button(
             parent,
             text="스왑 실행",
@@ -320,6 +350,24 @@ class FaceSwapApp:
             res_row,
             text="  결과 영상이 선택한 해상도로 저장됨. 낮을수록 빠르고 파일 작지만 화질 손해.",
             fg="#666", font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        venh = Frame(parent, padx=8)
+        venh.pack(fill="x", pady=(0, 4))
+        Checkbutton(
+            venh,
+            text="화질 개선 (스왑된 얼굴 선명하게)",
+            variable=self.enhance_video,
+        ).pack(side="left")
+        Label(venh, text="강도:").pack(side="left", padx=(12, 0))
+        ttk.Combobox(
+            venh, textvariable=self.enhance_strength_v,
+            values=["약하게", "보통", "강하게"], state="readonly", width=8,
+        ).pack(side="left", padx=(6, 0))
+        Label(
+            venh,
+            text="  ⚠ 켜면 처리 시간이 2~3배 늘어요. 해상도를 함께 낮추면 상쇄됩니다.",
+            fg="#a33", font=("Segoe UI", 9),
         ).pack(side="left")
 
         sd_row = Frame(parent, padx=8)
@@ -426,6 +474,58 @@ class FaceSwapApp:
         canvas.delete("all")
         canvas.create_image(THUMB // 2, THUMB // 2, image=photo, anchor="center")
 
+    # -------------------------------------------------------- 화질 개선(GFPGAN)
+    _STRENGTH_MAP = {"약하게": 0.5, "보통": 0.8, "강하게": 1.0}
+
+    def _enhancer_ready(self) -> bool:
+        p = enhancer_model_path()
+        return p.exists() and verify_enhancer_model(p)
+
+    def _ensure_enhancer_downloaded(self) -> bool:
+        """모델이 없으면 물어보고 받는다. 지금 바로 쓸 수 있으면 True."""
+        if self._enhancer_ready():
+            return True
+        if not messagebox.askyesno(
+            "화질 개선 모델 필요",
+            "화질 개선을 처음 쓰려면 모델 파일(약 330MB)을 받아야 해요.\n\n"
+            "지금 받을까요? (몇 분 걸립니다)",
+        ):
+            return False
+        self._download_enhancer_async()
+        return False
+
+    def _download_enhancer_async(self) -> None:
+        self.status_var.set("화질 개선 모델 다운로드 중...")
+        self.v_status.set("화질 개선 모델 다운로드 중...")
+
+        def worker():
+            try:
+                def prog(seen, total):
+                    if total:
+                        msg = f"화질 개선 모델 다운로드 {seen/1e6:.0f} / {total/1e6:.0f} MB"
+                    else:
+                        msg = f"화질 개선 모델 다운로드 {seen/1e6:.0f} MB"
+                    self.root.after(0, self.status_var.set, msg)
+                    self.root.after(0, self.v_status.set, msg)
+
+                download_enhancer(progress=prog)
+                self.root.after(0, messagebox.showinfo, "다운로드 완료",
+                                "화질 개선 모델 준비됐어요.\n'화질 개선'을 켜고 다시 실행하세요.")
+                self.root.after(0, self.status_var.set, "화질 개선 모델 준비 완료")
+                self.root.after(0, self.v_status.set, "화질 개선 모델 준비 완료")
+            except Exception as e:
+                self.root.after(0, messagebox.showerror, "다운로드 실패", str(e))
+                self.root.after(0, self.status_var.set, "화질 개선 모델 다운로드 실패")
+                self.root.after(0, self.v_status.set, "화질 개선 모델 다운로드 실패")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _get_enhancer(self, status_setter) -> FaceEnhancer:
+        if self.enhancer is None:
+            status_setter("화질 개선 모델 로딩 중...")
+            self.enhancer = FaceEnhancer(enhancer_model_path())
+        return self.enhancer
+
     def _get_identity(self, pipe, paths, cache_attr: str, status_setter):
         """소스 사진 목록에서 평균 정체성을 만든다 (같은 목록이면 캐시 재사용)."""
         paths = [p for p in (paths or []) if p]
@@ -471,6 +571,8 @@ class FaceSwapApp:
         if not self.target_path:
             messagebox.showwarning("사진 필요", "타깃 사진(얼굴 바꿀 사진)을 먼저 선택하세요.")
             return
+        if self.enhance_photo.get() and not self._ensure_enhancer_downloaded():
+            return
         self.swap_btn.config(state="disabled")
         self.save_btn.config(state="disabled")
         self.progress.start(10)
@@ -501,6 +603,13 @@ class FaceSwapApp:
             result = tgt_img.copy()
             for tf in to_replace:
                 result = pipe.swapper.swap(result, tf, src_face)
+
+            if self.enhance_photo.get():
+                enhancer = self._get_enhancer(
+                    lambda s: self.root.after(0, self.status_var.set, s))
+                self.root.after(0, self.status_var.set, "화질 개선 중...")
+                blend = self._STRENGTH_MAP.get(self.enhance_strength.get(), 0.8)
+                result = enhancer.enhance_faces(result, to_replace, blend=blend)
 
             self.result_bgr = result
             self.root.after(0, self._on_photo_done, result, None)
@@ -585,6 +694,8 @@ class FaceSwapApp:
         if not self.v_output_path:
             messagebox.showwarning("저장 경로 필요", "결과 저장 경로를 지정하세요.")
             return
+        if self.enhance_video.get() and not self._ensure_enhancer_downloaded():
+            return
         self.v_running = True
         self._cancel = False
         self._video_proc_start = None
@@ -641,6 +752,12 @@ class FaceSwapApp:
                 cache_attr="_v_identity_cache",
                 status_setter=lambda s: self.root.after(0, self.v_status.set, s),
             )
+            enhancer = None
+            enhance_blend = 0.8
+            if self.enhance_video.get():
+                enhancer = self._get_enhancer(
+                    lambda s: self.root.after(0, self.v_status.set, s))
+                enhance_blend = self._STRENGTH_MAP.get(self.enhance_strength_v.get(), 0.8)
             swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,
@@ -649,6 +766,8 @@ class FaceSwapApp:
                 target_mode=target_mode,
                 resize_height=resize_height,
                 source_face=src_face,
+                enhancer=enhancer,
+                enhance_blend=enhance_blend,
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,
             )

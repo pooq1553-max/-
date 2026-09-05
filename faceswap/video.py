@@ -196,6 +196,8 @@ def swap_video(
     target_mode: Optional[str] = None,
     resize_height: Optional[int] = None,
     source_face=None,
+    enhancer=None,
+    enhance_blend: float = 0.8,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Path:
@@ -263,6 +265,9 @@ def swap_video(
                     to_replace = pipeline.detector.select_targets(tgt_faces, target_mode)
                     for tf in to_replace:
                         frame = pipeline.swapper.swap(frame, tf, src_face)
+                    if enhancer is not None and to_replace:
+                        # 스왑된 얼굴 자리를 그대로 다시 정렬해 화질 복원
+                        frame = enhancer.enhance_faces(frame, to_replace, blend=enhance_blend)
 
                 writer.write(frame)
                 frame_idx += 1
