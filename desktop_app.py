@@ -157,6 +157,7 @@ class FaceSwapApp:
         self.v_target_info = StringVar(value="선택된 동영상 없음")
         self.v_output_info = StringVar(value="선택된 저장 경로 없음")
         self.v_status = StringVar(value="사진 + 동영상 + 저장 경로 선택 후 시작.")
+        self.v_eta = StringVar(value="")
         self.v_running = False
         self.v_resolution = StringVar(value="원본 유지")
         self.v_target_mode = StringVar(value="가장 큰 얼굴만")
@@ -295,7 +296,8 @@ class FaceSwapApp:
         self.progress = ttk.Progressbar(parent, mode="indeterminate", length=400)
         self.progress.pack(pady=4)
 
-        Label(parent, textvariable=self.status_var, fg="#555").pack(pady=(2, 8))
+        Label(parent, textvariable=self.status_var, fg="#555",
+              wraplength=980, justify="center").pack(pady=(2, 8))
 
     def _build_video_tab(self, parent: Frame) -> None:
         top = Frame(parent, padx=8, pady=8)
@@ -404,7 +406,12 @@ class FaceSwapApp:
 
         self.v_progress = ttk.Progressbar(parent, mode="determinate", length=520, maximum=100)
         self.v_progress.pack(pady=6)
-        Label(parent, textvariable=self.v_status, fg="#555").pack(pady=(2, 8))
+        Label(parent, textvariable=self.v_status, fg="#555",
+              wraplength=980, justify="center").pack(pady=(2, 0))
+        # 남은 시간은 한 줄에 몰아넣으면 창 밖으로 잘리므로 따로, 크게 표시한다
+        Label(parent, textvariable=self.v_eta, fg="#1565c0",
+              font=("Segoe UI", 11, "bold"),
+              wraplength=980, justify="center").pack(pady=(0, 8))
 
     def _make_panel(self, parent: Frame, title: str, pick_cb, col: int,
                     count_var: StringVar | None = None, hint: str = "") -> Canvas:
@@ -712,6 +719,7 @@ class FaceSwapApp:
         self.v_cancel_btn.config(state="normal")
         self.v_progress.config(mode="determinate", value=0)
         self.v_status.set("시작 중...")
+        self.v_eta.set("")
         threading.Thread(target=self._video_worker, daemon=True).start()
 
     @staticmethod
@@ -733,21 +741,24 @@ class FaceSwapApp:
         if self._video_proc_start is None:
             self._video_proc_start = now
 
-        extra = ""
-        if done > 0 and total > 0:
+        eta_text = ""
+        if done > 0:
             elapsed = max(now - self._video_proc_start, 1e-3)
             fps = done / elapsed
-            remaining = max(total - done, 0)
-            eta = remaining / fps if fps > 0 else 0
-            if fps >= 1:
-                speed = f"{fps:.1f} 프레임/초"
+            speed = (f"{fps:.1f} 프레임/초" if fps >= 1
+                     else f"프레임당 {1.0 / fps:.1f}초")
+            if total > 0:
+                eta = max(total - done, 0) / fps
+                eta_text = f"남은 시간 약 {self._fmt_eta(eta)}  ·  {speed}"
             else:
-                speed = f"프레임당 {1.0 / fps:.1f}초"
-            extra = f" · 남은 시간 약 {self._fmt_eta(eta)} · {speed}"
+                # 일부 영상은 전체 프레임 수를 못 읽는다. 그래도 경과와 속도는 보여준다.
+                eta_text = (f"경과 {self._fmt_eta(elapsed)}  ·  {speed}"
+                            f"  ·  (전체 길이를 못 읽어 남은 시간 계산 불가)")
 
-        text = f"{msg} · {pct:.1f}%{extra}"
+        text = f"{msg} · {pct:.1f}%" if total > 0 else msg
         self.root.after(0, lambda: (self.v_progress.config(value=pct),
-                                     self.v_status.set(text)))
+                                     self.v_status.set(text),
+                                     self.v_eta.set(eta_text)))
 
     def _video_worker(self) -> None:
         start = time.time()
@@ -801,11 +812,13 @@ class FaceSwapApp:
         if error:
             self.v_progress.config(value=0)
             self.v_status.set("에러 또는 취소됨")
+            self.v_eta.set("")
             messagebox.showerror("동영상 스왑 실패", error)
             return
         self.v_progress.config(value=100)
         m, s = divmod(int(elapsed), 60)
         self.v_status.set(f"완료 · 소요 {m}분 {s}초 · 저장 위치: {self.v_output_path}")
+        self.v_eta.set("")
         if self.v_shutdown.get():
             self._start_shutdown_countdown()
             return
