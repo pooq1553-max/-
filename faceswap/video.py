@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -188,6 +188,85 @@ def probe_video(path: str | Path) -> dict:
     return info
 
 
+def _free_path(path: Path) -> Path:
+    """path가 이미 있거나 못 쓸 때 옆에 번호를 붙인 빈 경로를 찾는다."""
+    for i in range(1, 1000):
+        cand = path.with_name(f"{path.stem}_{i}{path.suffix}")
+        if not cand.exists():
+            return cand
+    return path.with_name(f"{path.stem}_{int(time.time())}{path.suffix}")
+
+
+def _deliver_output(
+    tmp_video: Path,
+    output_path: Path,
+    source_video: Path,
+    ffmpeg: Optional[str],
+) -> tuple[Path, Optional[str]]:
+    """처리 결과를 최종 위치로 옮긴다.
+
+    오래 걸린 작업이므로 결과를 절대 잃지 않는 것이 최우선이다. 원하는
+    경로에 못 쓰면 옆에 번호를 붙여서라도 반드시 남긴다.
+    반환: (실제 저장된 경로, 경고 문구 또는 None)
+    """
+    problems: List[str] = []
+
+    # 1순위: 원본 음성까지 합쳐서 저장
+    if ffmpeg:
+        result = subprocess.run(
+            [
+                ffmpeg, "-y",
+                "-i", str(tmp_video),
+                "-i", str(source_video),
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-map", "0:v:0",
+                "-map", "1:a:0?",
+                "-shortest",
+                str(output_path),
+            ],
+            capture_output=True,
+        )
+        if result.returncode == 0 and output_path.exists():
+            return output_path, None
+        problems.append(
+            "음성 합치기 실패: "
+            + result.stderr.decode("utf-8", errors="replace").strip()[-300:]
+        )
+
+    # 2순위: 음성 없이 영상만 그 경로에 저장
+    try:
+        shutil.copy2(tmp_video, output_path)
+        if problems:
+            return output_path, ("원본 음성을 합치지 못해 영상만 저장했어요.\n"
+                                 + "\n".join(problems))
+        return output_path, (
+            "ffmpeg이 없어 원본 음성 없이 영상만 저장했어요.\n"
+            "음성까지 넣으려면 PowerShell에서:\n"
+            "  .\\.venv\\Scripts\\python.exe -m pip install imageio-ffmpeg"
+        )
+    except Exception as e:
+        problems.append(f"지정한 경로에 저장 실패: {e}")
+
+    # 3순위: 어디든 남긴다. 여기서 포기하면 작업 결과가 통째로 사라진다.
+    alt = _free_path(output_path)
+    try:
+        shutil.copy2(tmp_video, alt)
+        return alt, (
+            f"지정한 경로에 저장할 수 없어 다른 이름으로 저장했어요:\n{alt}\n\n"
+            "원래 경로에 못 쓴 이유는 보통 둘 중 하나예요.\n"
+            "  · 저장 경로를 원본 영상과 같은 파일로 지정함\n"
+            "  · 그 파일이 다른 프로그램(플레이어 등)에서 열려 있음\n\n"
+            + "\n".join(problems)
+        )
+    except Exception as e:
+        problems.append(f"대체 경로에도 저장 실패: {e}")
+
+    raise RuntimeError(
+        "처리는 끝났지만 결과를 저장하지 못했어요.\n\n" + "\n".join(problems)
+    )
+
+
 def swap_video(
     pipeline: FaceSwapPipeline,
     source_image_path: str | Path,
@@ -201,7 +280,25 @@ def swap_video(
     enhance_blend: float = 0.8,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
-) -> Path:
+) -> Tuple[Path, Optional[str]]:
+    """동영상의 얼굴을 바꿔 저장한다.
+
+    반환: (실제로 저장된 경로, 경고 문구 또는 None). 지정한 경로에 쓸 수
+    없으면 다른 이름으로라도 저장하고 그 사정을 경고로 돌려준다.
+    """
+    # 같은 파일을 읽으면서 덮어쓸 수는 없다. 처리를 다 끝낸 뒤 저장 단계에서
+    # 실패하면 오래 걸린 작업이 통째로 날아가므로 시작 전에 막는다.
+    try:
+        same_file = Path(target_video_path).resolve() == Path(output_video_path).resolve()
+    except OSError:
+        same_file = False
+    if same_file:
+        raise ValueError(
+            "저장 경로가 원본 동영상과 같은 파일이에요.\n"
+            "원본을 읽으면서 같은 파일에 덮어쓸 수는 없어요.\n"
+            "다른 이름으로 저장 경로를 지정해주세요."
+        )
+
     # target_mode 우선: largest / all / female / male.
     # 미지정 시 기존 replace_all 로 결정(all 또는 largest).
     if target_mode is None:
@@ -288,31 +385,12 @@ def swap_video(
             cap.release()
             writer.release()
 
-        ffmpeg = _ffmpeg_exe()
-        if ffmpeg:
-            if progress:
-                progress(frame_idx, total_frames, "원본 음성 합치는 중...")
-            try:
-                subprocess.run(
-                    [
-                        ffmpeg, "-y",
-                        "-i", str(tmp_video),
-                        "-i", str(target_video_path),
-                        "-c:v", "copy",
-                        "-c:a", "aac",
-                        "-map", "0:v:0",
-                        "-map", "1:a:0?",
-                        "-shortest",
-                        str(output_video_path),
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-            except subprocess.CalledProcessError:
-                shutil.copy2(tmp_video, output_video_path)
-        else:
-            shutil.copy2(tmp_video, output_video_path)
+        if progress:
+            progress(frame_idx, total_frames, "결과 저장 중...")
+        saved_path, warning = _deliver_output(
+            tmp_video, output_video_path, Path(target_video_path), _ffmpeg_exe()
+        )
 
     if progress:
         progress(total_frames, total_frames, "완료")
-    return output_video_path
+    return saved_path, warning

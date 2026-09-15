@@ -785,7 +785,7 @@ class FaceSwapApp:
 
             # 모델·정체성 준비가 모두 끝난 지금부터 재야 프레임 처리 속도가 정확하다
             self._video_proc_start = time.time()
-            swap_video(
+            saved_path, warning = swap_video(
                 pipeline=pipe,
                 source_image_path=self.v_source_path,
                 target_video_path=self.v_target_path,
@@ -798,14 +798,16 @@ class FaceSwapApp:
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,
             )
+            # 지정한 곳에 못 써서 다른 이름으로 저장됐을 수 있다
+            self.v_output_path = str(saved_path)
             elapsed = time.time() - start
-            self.root.after(0, self._on_video_done, None, elapsed)
+            self.root.after(0, self._on_video_done, None, elapsed, warning)
         except Exception as e:
             self.root.after(0, self._on_video_done, _err_detail(e), None)
         finally:
             _allow_sleep()
 
-    def _on_video_done(self, error, elapsed) -> None:
+    def _on_video_done(self, error, elapsed, warning=None) -> None:
         self.v_running = False
         self.v_start_btn.config(state="normal")
         self.v_cancel_btn.config(state="disabled")
@@ -822,8 +824,12 @@ class FaceSwapApp:
         if self.v_shutdown.get():
             self._start_shutdown_countdown()
             return
-        messagebox.showinfo("동영상 스왑 완료",
-            f"저장됨:\n{self.v_output_path}\n\n소요 시간: {m}분 {s}초")
+        body = f"저장됨:\n{self.v_output_path}\n\n소요 시간: {m}분 {s}초"
+        if warning:
+            # 저장은 됐지만 알아야 할 사정이 있는 경우 (경로 변경, 음성 누락 등)
+            messagebox.showwarning("동영상 스왑 완료 (확인 필요)", f"{body}\n\n{warning}")
+        else:
+            messagebox.showinfo("동영상 스왑 완료", body)
 
     def _start_shutdown_countdown(self, seconds: int = 60) -> None:
         """스왑 완료 후 컴퓨터 종료를 예약하고, 취소 가능한 안내창을 띄운다."""
