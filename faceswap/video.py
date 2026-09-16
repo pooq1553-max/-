@@ -334,13 +334,21 @@ def swap_video(
     output_video_path = Path(output_video_path)
     output_video_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="faceswap_") as td:
-        tmp_video = Path(td) / "video_no_audio.mp4"
+    # 중간 결과를 저장 폴더 옆에 둔다. 임시 폴더에 두면 프로세스가 강제 종료될 때
+    # (메모리 부족 등) 처리분이 통째로 사라지지만, 여기에 두면 .partial 파일로
+    # 남아 건질 수 있다. 저장 폴더에 못 쓰는 경우도 수십 분 뒤가 아니라 지금 드러난다.
+    tmp_video = output_video_path.with_name(output_video_path.stem + ".partial.mp4")
+    saved_path: Optional[Path] = None
+    warning: Optional[str] = None
+    try:
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(str(tmp_video), fourcc, fps, (out_width, out_height))
         if not writer.isOpened():
             cap.release()
-            raise IOError("VideoWriter 초기화 실패")
+            raise IOError(
+                f"결과 파일을 만들 수 없어요: {tmp_video}\n"
+                "저장 폴더에 쓰기 권한이 있는지, 경로가 올바른지 확인해주세요."
+            )
 
         frame_idx = 0
         need_resize = (out_width, out_height) != (src_width, src_height)
@@ -390,6 +398,14 @@ def swap_video(
         saved_path, warning = _deliver_output(
             tmp_video, output_video_path, Path(target_video_path), _ffmpeg_exe()
         )
+    finally:
+        # 저장까지 끝났으면 중간 파일은 지운다.
+        # 중간에 죽거나 실패하면 .partial 파일이 남아 건질 수 있다.
+        if saved_path is not None:
+            try:
+                tmp_video.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     if progress:
         progress(total_frames, total_frames, "완료")

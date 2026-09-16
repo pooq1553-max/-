@@ -105,8 +105,15 @@ class FaceEnhancer:
         if not model_path.exists():
             raise FileNotFoundError(f"화질 개선 모델이 없어요: {model_path}")
 
+        # ONNX 런타임의 기본 메모리 아레나는 한 번 잡은 메모리를 OS에 돌려주지
+        # 않는다. 긴 영상을 프레임마다 돌리면 사용량이 계속 불어나 결국 프로세스가
+        # 강제 종료된다(파이썬 예외 없이 exit -1). 끄면 사용량이 안정된다.
+        so = onnxruntime.SessionOptions()
+        so.enable_cpu_mem_arena = False
         self.session = onnxruntime.InferenceSession(
-            str(model_path), providers=providers or ["CPUExecutionProvider"]
+            str(model_path),
+            sess_options=so,
+            providers=providers or ["CPUExecutionProvider"],
         )
         self.input_name = self.session.get_inputs()[0].name
         self.output_name = self.session.get_outputs()[0].name

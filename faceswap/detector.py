@@ -33,10 +33,18 @@ class FaceDetector:
     def __init__(self, model_name: str = "buffalo_l", providers: Optional[List[str]] = None, det_size: int = 640):
         import insightface
 
-        self.app = insightface.app.FaceAnalysis(
-            name=model_name,
-            providers=providers or ["CPUExecutionProvider"],
-        )
+        prov = providers or ["CPUExecutionProvider"]
+        # 메모리 아레나를 끄지 않으면 긴 영상 처리 중 사용량이 계속 불어난다.
+        # 버전에 따라 sess_options를 못 받으면 기본 방식으로 되돌린다.
+        try:
+            import onnxruntime
+            so = onnxruntime.SessionOptions()
+            so.enable_cpu_mem_arena = False
+            self.app = insightface.app.FaceAnalysis(
+                name=model_name, providers=prov, sess_options=so
+            )
+        except Exception:
+            self.app = insightface.app.FaceAnalysis(name=model_name, providers=prov)
         self.app.prepare(ctx_id=0, det_size=(det_size, det_size))
 
     @staticmethod
