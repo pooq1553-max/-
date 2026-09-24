@@ -2,12 +2,6 @@ __pycache__/
 *.pyc
 reports/
 
-# telegram_report_digest: 비밀값·세션·실행 상태
-telegram_report_digest/.env
-telegram_report_digest/*.session
-telegram_report_digest/*.session-journal
-telegram_report_digest/state.json
-telegram_report_digest/pending.json
-telegram_report_digest/summaries/
-telegram_report_digest/run.log
-telegram_report_digest/.venv/
+
+# telegram_report_digest: 봇에서 받은 PDF·작업 파일
+telegram_report_digest/inbox/
