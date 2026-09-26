@@ -1,0 +1,55 @@
+name: Weekly Live Brief
+
+on:
+  schedule:
+    # 일요일 08:45 KST (= 토요일 23:45 UTC) — 방송 전에 메일로 받는다
+    - cron: '45 23 * * 6'
+  workflow_dispatch:
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance pandas matplotlib numpy pykrx
+
+      - name: Build weekly brief
+        run: |
+          mkdir -p reports
+          TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
+          echo "TODAY=$TODAY" >> $GITHUB_ENV
+          python3 weekly_brief.py -o reports/weekly_brief_$TODAY.html
+
+      - name: Send email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.GMAIL_ADDRESS }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "[주간 라이브] 미장·국장 주간 시황 - ${{ env.TODAY }}"
+          to: pooq1553@gmail.com
+          from: 투자보고서봇
+          body: |
+            이번 주 라이브 방송 자료입니다.
+            첨부된 weekly_brief_${{ env.TODAY }}.html 을 브라우저로 열어 화면 공유하면 됩니다.
+            (← / → 키로 섹션 이동, 인터넷 없이도 열립니다)
+
+            구성
+            1. 오프닝: 지수 + 이번 주 핵심 요약
+            2. 환율·금리·원자재
+            3. 미장 섹터 — 돈은 어디로 갔나 (섹터 ETF 등락 + 거래대금 증감, 스타일 대결)
+            4. 테마 머니플로우 맵 (87개 테마, 등락 x 거래대금)
+            5. 미장 특징주 (상승/하락/거래대금 급증/52주 신고가)
+            6. 국장 수급 (투자자별 순매수, 외국인·기관 TOP, 업종)
+            7. 국장 특징주 (상승/하락/거래대금 TOP)
+            8. 다음 주 체크포인트 (실적 일정 + 메모)
+          attachments: reports/weekly_brief_${{ env.TODAY }}.html
