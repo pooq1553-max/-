@@ -267,29 +267,28 @@ def _deliver_output(
     )
 
 
-def swap_video(
-    pipeline: FaceSwapPipeline,
-    source_image_path: str | Path,
+def process_video(
     target_video_path: str | Path,
     output_video_path: str | Path,
-    replace_all: bool = False,
-    target_mode: Optional[str] = None,
+    frame_fn: Callable[[np.ndarray], np.ndarray],
     resize_height: Optional[int] = None,
-    source_face=None,
-    enhancer=None,
-    enhance_blend: float = 0.8,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Tuple[Path, Optional[str]]:
-    """동영상의 얼굴을 바꿔 저장한다.
+    """동영상을 프레임 단위로 frame_fn에 통과시켜 저장한다.
 
-    반환: (실제로 저장된 경로, 경고 문구 또는 None). 지정한 경로에 쓸 수
-    없으면 다른 이름으로라도 저장하고 그 사정을 경고로 돌려준다.
+    프레임을 어떻게 바꿀지만 frame_fn이 정하고, 읽기·크기 조정·쓰기·진행
+    보고·취소·원본 음성 합치기·저장 실패 대비는 전부 여기서 처리한다.
+    스왑과 모자이크가 같은 안전장치를 공유하도록 하기 위한 공통 루프다.
+
+    반환: (실제로 저장된 경로, 경고 문구 또는 None)
     """
+    output_video_path = Path(output_video_path)
+
     # 같은 파일을 읽으면서 덮어쓸 수는 없다. 처리를 다 끝낸 뒤 저장 단계에서
     # 실패하면 오래 걸린 작업이 통째로 날아가므로 시작 전에 막는다.
     try:
-        same_file = Path(target_video_path).resolve() == Path(output_video_path).resolve()
+        same_file = Path(target_video_path).resolve() == output_video_path.resolve()
     except OSError:
         same_file = False
     if same_file:
@@ -298,20 +297,6 @@ def swap_video(
             "원본을 읽으면서 같은 파일에 덮어쓸 수는 없어요.\n"
             "다른 이름으로 저장 경로를 지정해주세요."
         )
-
-    # target_mode 우선: largest / all / female / male.
-    # 미지정 시 기존 replace_all 로 결정(all 또는 largest).
-    if target_mode is None:
-        target_mode = "all" if replace_all else "largest"
-    if source_face is not None:
-        # 여러 장에서 미리 만들어 둔 평균 정체성을 그대로 사용
-        src_face = source_face
-    else:
-        src_img = _imread_unicode(source_image_path)
-        src_faces = pipeline.detector.detect(src_img)
-        if not src_faces:
-            raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
-        src_face = pipeline.detector.select(src_faces, "largest")
 
     cap = cv2.VideoCapture(str(target_video_path))
     if not cap.isOpened():
@@ -370,14 +355,7 @@ def swap_video(
                 if need_resize:
                     frame = cv2.resize(frame, (out_width, out_height), interpolation=cv2.INTER_AREA)
 
-                tgt_faces = pipeline.detector.detect(frame)
-                if tgt_faces:
-                    to_replace = pipeline.detector.select_targets(tgt_faces, target_mode)
-                    for tf in to_replace:
-                        frame = pipeline.swapper.swap(frame, tf, src_face)
-                    if enhancer is not None and to_replace:
-                        # 스왑된 얼굴 자리를 그대로 다시 정렬해 화질 복원
-                        frame = enhancer.enhance_faces(frame, to_replace, blend=enhance_blend)
+                frame = frame_fn(frame)
 
                 writer.write(frame)
                 frame_idx += 1
@@ -410,3 +388,59 @@ def swap_video(
     if progress:
         progress(total_frames, total_frames, "완료")
     return saved_path, warning
+
+
+def swap_video(
+    pipeline: FaceSwapPipeline,
+    source_image_path: str | Path,
+    target_video_path: str | Path,
+    output_video_path: str | Path,
+    replace_all: bool = False,
+    target_mode: Optional[str] = None,
+    resize_height: Optional[int] = None,
+    source_face=None,
+    enhancer=None,
+    enhance_blend: float = 0.8,
+    progress: Optional[ProgressCallback] = None,
+    cancel: Optional[CancelPredicate] = None,
+) -> Tuple[Path, Optional[str]]:
+    """동영상의 얼굴을 바꿔 저장한다.
+
+    반환: (실제로 저장된 경로, 경고 문구 또는 None). 지정한 경로에 쓸 수
+    없으면 다른 이름으로라도 저장하고 그 사정을 경고로 돌려준다.
+    """
+    # target_mode 우선: largest / all / female / male.
+    # 미지정 시 기존 replace_all 로 결정(all 또는 largest).
+    if target_mode is None:
+        target_mode = "all" if replace_all else "largest"
+
+    if source_face is not None:
+        # 여러 장에서 미리 만들어 둔 평균 정체성을 그대로 사용
+        src_face = source_face
+    else:
+        src_img = _imread_unicode(source_image_path)
+        src_faces = pipeline.detector.detect(src_img)
+        if not src_faces:
+            raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
+        src_face = pipeline.detector.select(src_faces, "largest")
+
+    def frame_fn(frame: np.ndarray) -> np.ndarray:
+        tgt_faces = pipeline.detector.detect(frame)
+        if not tgt_faces:
+            return frame
+        to_replace = pipeline.detector.select_targets(tgt_faces, target_mode)
+        for tf in to_replace:
+            frame = pipeline.swapper.swap(frame, tf, src_face)
+        if enhancer is not None and to_replace:
+            # 스왑된 얼굴 자리를 그대로 다시 정렬해 화질 복원
+            frame = enhancer.enhance_faces(frame, to_replace, blend=enhance_blend)
+        return frame
+
+    return process_video(
+        target_video_path=target_video_path,
+        output_video_path=output_video_path,
+        frame_fn=frame_fn,
+        resize_height=resize_height,
+        progress=progress,
+        cancel=cancel,
+    )

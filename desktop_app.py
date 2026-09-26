@@ -34,6 +34,7 @@ from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import concat_videos, probe_video, swap_video, trim_video
 from faceswap.highlights import find_highlights, extract_highlight_clips
 from faceswap.identity import build_identity
+from faceswap.mosaic import mosaic_video
 from faceswap.enhance import (
     FaceEnhancer,
     download_enhancer,
@@ -174,6 +175,25 @@ class FaceSwapApp:
         self.dl_send_after = BooleanVar(value=True)
         self.dl_browser = StringVar(value="없음")
 
+        # mosaic state
+        self.mo_input_path: str | None = None
+        self.mo_output_path: str | None = None
+        self.mo_ref_paths: list[str] = []
+        self.mo_input_info = StringVar(value="선택된 동영상 없음")
+        self.mo_output_info = StringVar(value="선택된 저장 경로 없음")
+        self.mo_ref_info = StringVar(value="기준 사진 없음")
+        self.mo_target = StringVar(value="모든 얼굴")
+        self.mo_style = StringVar(value="모자이크")
+        self.mo_strength = StringVar(value="보통")
+        self.mo_shape = StringVar(value="타원")
+        self.mo_resolution = StringVar(value="원본 유지")
+        self.mo_status = StringVar(value="동영상과 저장 경로를 고르고 시작하세요.")
+        self.mo_eta = StringVar(value="")
+        self.mo_running = False
+        self._mo_cancel = False
+        self._mo_proc_start: float | None = None
+        self._mo_identity_cache = None
+
         # highlight state
         self.hl_input_path: str | None = None
         self.hl_output_dir: str | None = None
@@ -220,8 +240,10 @@ class FaceSwapApp:
         self.trim_tab = Frame(nb)
         self.merge_tab = Frame(nb)
         self.highlight_tab = Frame(nb)
+        self.mosaic_tab = Frame(nb)
         nb.add(self.photo_tab, text="  사진 스왑  ")
         nb.add(self.video_tab, text="  동영상 스왑  ")
+        nb.add(self.mosaic_tab, text="  모자이크  ")
         nb.add(self.download_tab, text="  동영상 다운로드  ")
         nb.add(self.trim_tab, text="  동영상 자르기  ")
         nb.add(self.merge_tab, text="  동영상 합치기  ")
@@ -233,6 +255,7 @@ class FaceSwapApp:
         self._build_trim_tab(self.trim_tab)
         self._build_merge_tab(self.merge_tab)
         self._build_highlight_tab(self.highlight_tab)
+        self._build_mosaic_tab(self.mosaic_tab)
 
         note = Label(
             self.root,
@@ -733,17 +756,18 @@ class FaceSwapApp:
             return f"{m}분 {s}초"
         return f"{s}초"
 
-    def _video_progress(self, done: int, total: int, msg: str) -> None:
-        pct = (done / total * 100) if total > 0 else 0
+    def _calc_progress(self, done: int, total: int, msg: str, start_ts):
+        """진행률·상태문구·남은시간문구를 계산한다. 동영상 처리 탭들이 공유."""
         now = time.time()
-        # 시작 시각은 프레임 처리 직전에 잡아두므로(_video_worker) 첫 보고부터
-        # 경과 시간이 0보다 크다. 혹시 없으면 여기서 잡는 안전망만 둔다.
-        if self._video_proc_start is None:
-            self._video_proc_start = now
+        # 시작 시각은 프레임 처리 직전에 잡아두므로 첫 보고부터 경과 시간이
+        # 0보다 크다. 혹시 없으면 여기서 잡는 안전망만 둔다.
+        if start_ts is None:
+            start_ts = now
 
+        pct = (done / total * 100) if total > 0 else 0
         eta_text = ""
         if done > 0:
-            elapsed = max(now - self._video_proc_start, 1e-3)
+            elapsed = max(now - start_ts, 1e-3)
             fps = done / elapsed
             speed = (f"{fps:.1f} 프레임/초" if fps >= 1
                      else f"프레임당 {1.0 / fps:.1f}초")
@@ -756,9 +780,21 @@ class FaceSwapApp:
                             f"  ·  (전체 길이를 못 읽어 남은 시간 계산 불가)")
 
         text = f"{msg} · {pct:.1f}%" if total > 0 else msg
+        return pct, text, eta_text, start_ts
+
+    def _video_progress(self, done: int, total: int, msg: str) -> None:
+        pct, text, eta_text, self._video_proc_start = self._calc_progress(
+            done, total, msg, self._video_proc_start)
         self.root.after(0, lambda: (self.v_progress.config(value=pct),
                                      self.v_status.set(text),
                                      self.v_eta.set(eta_text)))
+
+    def _mosaic_progress(self, done: int, total: int, msg: str) -> None:
+        pct, text, eta_text, self._mo_proc_start = self._calc_progress(
+            done, total, msg, self._mo_proc_start)
+        self.root.after(0, lambda: (self.mo_progress.config(value=pct),
+                                     self.mo_status.set(text),
+                                     self.mo_eta.set(eta_text)))
 
     def _video_worker(self) -> None:
         start = time.time()
@@ -1376,6 +1412,234 @@ class FaceSwapApp:
             self._send_to_video_swap(self.mg_output_path)
         else:
             messagebox.showinfo("합치기 완료", f"저장됨:\n{self.mg_output_path}")
+
+    # ----------------------------------------------------------- mosaic UI
+    _MO_TARGETS = {
+        "모든 얼굴": "all",
+        "가장 큰 얼굴만": "largest",
+        "여성 얼굴만": "female",
+        "남성 얼굴만": "male",
+        "기준 인물만 가리기": "match",
+        "기준 인물 빼고 전부 가리기": "except_match",
+    }
+    _MO_STYLES = {"모자이크": "pixelate", "흐리게": "blur"}
+    _MO_SHAPES = {"타원": "ellipse", "사각형": "rect"}
+
+    def _build_mosaic_tab(self, parent: Frame) -> None:
+        wrap = Frame(parent, padx=16, pady=12)
+        wrap.pack(fill="both", expand=True)
+
+        Label(wrap, text="가릴 동영상", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.mo_input_info, fg="#333",
+              wraplength=900, justify="left").pack(anchor="w", pady=2)
+        Button(wrap, text="동영상 선택...", command=self._mo_pick_input,
+               padx=10, pady=4).pack(anchor="w")
+
+        Label(wrap, text="").pack()
+        Label(wrap, text="저장 경로", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(wrap, textvariable=self.mo_output_info, fg="#333",
+              wraplength=900, justify="left").pack(anchor="w", pady=2)
+        Button(wrap, text="저장 위치 지정...", command=self._mo_pick_output,
+               padx=10, pady=4).pack(anchor="w")
+
+        Label(wrap, text="").pack()
+        row1 = Frame(wrap)
+        row1.pack(fill="x", pady=2)
+        Label(row1, text="가릴 대상:").pack(side="left")
+        ttk.Combobox(row1, textvariable=self.mo_target,
+                     values=list(self._MO_TARGETS), state="readonly",
+                     width=24).pack(side="left", padx=(6, 16))
+        Label(row1, text="방식:").pack(side="left")
+        ttk.Combobox(row1, textvariable=self.mo_style,
+                     values=list(self._MO_STYLES), state="readonly",
+                     width=10).pack(side="left", padx=(6, 16))
+        Label(row1, text="강도:").pack(side="left")
+        ttk.Combobox(row1, textvariable=self.mo_strength,
+                     values=["약하게", "보통", "강하게"], state="readonly",
+                     width=8).pack(side="left", padx=(6, 16))
+        Label(row1, text="모양:").pack(side="left")
+        ttk.Combobox(row1, textvariable=self.mo_shape,
+                     values=list(self._MO_SHAPES), state="readonly",
+                     width=8).pack(side="left", padx=(6, 0))
+
+        row2 = Frame(wrap)
+        row2.pack(fill="x", pady=2)
+        Label(row2, text="처리 해상도:").pack(side="left")
+        ttk.Combobox(row2, textvariable=self.mo_resolution,
+                     values=["원본 유지", "720p (2배 빠름)", "540p (3~4배 빠름)",
+                             "480p (5배 빠름)"],
+                     state="readonly", width=22).pack(side="left", padx=(6, 0))
+
+        Label(wrap, text="").pack()
+        ref_box = Frame(wrap)
+        ref_box.pack(fill="x")
+        Label(ref_box, text="기준 인물 사진",
+              font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        Label(ref_box,
+              text="'기준 인물만' 또는 '기준 인물 빼고 전부'를 골랐을 때만 필요해요. "
+                   "여러 장 고르면 더 정확합니다.",
+              fg="#666", font=("Segoe UI", 9), wraplength=900,
+              justify="left").pack(anchor="w")
+        Label(ref_box, textvariable=self.mo_ref_info, fg="#333",
+              wraplength=900, justify="left").pack(anchor="w", pady=2)
+        Button(ref_box, text="기준 사진 선택...", command=self._mo_pick_ref,
+               padx=10, pady=4).pack(anchor="w")
+
+        btns = Frame(wrap)
+        btns.pack(pady=(14, 4))
+        self.mo_start_btn = Button(
+            btns, text="모자이크 시작", command=self._run_mosaic,
+            font=("Segoe UI", 13, "bold"),
+            bg="#37474f", fg="white", padx=24, pady=10, relief="flat",
+            activebackground="#21303a", activeforeground="white",
+        )
+        self.mo_start_btn.pack(side="left", padx=4)
+        self.mo_cancel_btn = Button(
+            btns, text="취소", command=self._mo_request_cancel,
+            padx=16, pady=8, state="disabled")
+        self.mo_cancel_btn.pack(side="left", padx=4)
+
+        self.mo_progress = ttk.Progressbar(wrap, mode="determinate",
+                                           length=520, maximum=100)
+        self.mo_progress.pack(pady=6, fill="x")
+        Label(wrap, textvariable=self.mo_status, fg="#555",
+              wraplength=900, justify="left").pack(anchor="w")
+        Label(wrap, textvariable=self.mo_eta, fg="#1565c0",
+              font=("Segoe UI", 11, "bold"),
+              wraplength=900, justify="left").pack(anchor="w", pady=(0, 6))
+
+    def _mo_pick_input(self) -> None:
+        path = filedialog.askopenfilename(
+            title="가릴 동영상 선택",
+            filetypes=[("동영상", "*.mp4 *.mov *.avi *.mkv *.webm"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        try:
+            info = probe_video(path)
+        except Exception as e:
+            messagebox.showerror("동영상 오류", str(e))
+            return
+        m, s = divmod(int(info["duration_sec"]), 60)
+        self.mo_input_info.set(
+            f"{Path(path).name}\n"
+            f"{info['width']}x{info['height']} · {info['fps']:.1f} fps · {m}:{s:02d}")
+        self.mo_input_path = path
+        if not self.mo_output_path:
+            # 실수로 원본을 덮어쓰지 않도록 기본 저장 이름을 미리 채워둔다
+            p = Path(path)
+            self.mo_output_path = str(p.with_name(f"{p.stem}_mosaic.mp4"))
+            self.mo_output_info.set(self.mo_output_path)
+
+    def _mo_pick_output(self) -> None:
+        base = "mosaic.mp4"
+        if self.mo_input_path:
+            base = f"{Path(self.mo_input_path).stem}_mosaic.mp4"
+        path = filedialog.asksaveasfilename(
+            title="결과 저장 경로", defaultextension=".mp4",
+            filetypes=[("MP4", "*.mp4")], initialfile=base)
+        if path:
+            self.mo_output_path = path
+            self.mo_output_info.set(path)
+
+    def _mo_pick_ref(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="기준 인물 사진 선택 (여러 장 가능)",
+            filetypes=[("이미지", "*.jpg *.jpeg *.png *.bmp *.webp"), ("모든 파일", "*.*")])
+        if not paths:
+            return
+        self.mo_ref_paths = list(paths)
+        self._mo_identity_cache = None
+        n = len(self.mo_ref_paths)
+        self.mo_ref_info.set(
+            f"{n}장 선택됨" + (" (평균 정체성)" if n > 1 else "")
+            + f" · {Path(self.mo_ref_paths[0]).name}" + (" 외" if n > 1 else ""))
+
+    def _mo_request_cancel(self) -> None:
+        self._mo_cancel = True
+        self.mo_status.set("취소 요청됨... 현재 프레임 처리 후 중단.")
+
+    def _run_mosaic(self) -> None:
+        if self.mo_running:
+            return
+        if not self.mo_input_path:
+            messagebox.showwarning("동영상 필요", "가릴 동영상을 먼저 선택하세요.")
+            return
+        if not self.mo_output_path:
+            messagebox.showwarning("저장 경로 필요", "저장 위치를 지정하세요.")
+            return
+        mode = self._MO_TARGETS.get(self.mo_target.get(), "all")
+        if mode in ("match", "except_match") and not self.mo_ref_paths:
+            messagebox.showwarning(
+                "기준 사진 필요",
+                "'기준 인물' 모드를 쓰려면 그 사람의 사진을 선택해야 해요.")
+            return
+
+        self.mo_running = True
+        self._mo_cancel = False
+        self._mo_proc_start = None
+        self.mo_start_btn.config(state="disabled")
+        self.mo_cancel_btn.config(state="normal")
+        self.mo_progress.config(value=0)
+        self.mo_eta.set("")
+        self.mo_status.set("시작 중...")
+        threading.Thread(target=self._mosaic_worker, args=(mode,), daemon=True).start()
+
+    def _mosaic_worker(self, mode: str) -> None:
+        _prevent_sleep()
+        try:
+            pipe = self._ensure_pipeline(
+                lambda s: self.root.after(0, self.mo_status.set, s))
+
+            ref_embedding = None
+            if mode in ("match", "except_match"):
+                ref_face = self._get_identity(
+                    pipe, self.mo_ref_paths,
+                    cache_attr="_mo_identity_cache",
+                    status_setter=lambda s: self.root.after(0, self.mo_status.set, s))
+                ref_embedding = ref_face.embedding
+
+            res_map = {"원본 유지": None, "720p (2배 빠름)": 720,
+                       "540p (3~4배 빠름)": 540, "480p (5배 빠름)": 480}
+            strength_map = {"약하게": 0.35, "보통": 0.6, "강하게": 0.9}
+
+            self._mo_proc_start = time.time()
+            saved_path, warning = mosaic_video(
+                pipeline=pipe,
+                target_video_path=self.mo_input_path,
+                output_video_path=self.mo_output_path,
+                mode=mode,
+                reference_embedding=ref_embedding,
+                style=self._MO_STYLES.get(self.mo_style.get(), "pixelate"),
+                strength=strength_map.get(self.mo_strength.get(), 0.6),
+                shape=self._MO_SHAPES.get(self.mo_shape.get(), "ellipse"),
+                resize_height=res_map.get(self.mo_resolution.get()),
+                progress=self._mosaic_progress,
+                cancel=lambda: self._mo_cancel,
+            )
+            self.mo_output_path = str(saved_path)
+            self.root.after(0, self._on_mosaic_done, None, warning)
+        except Exception as e:
+            self.root.after(0, self._on_mosaic_done, _err_detail(e), None)
+        finally:
+            _allow_sleep()
+
+    def _on_mosaic_done(self, error, warning) -> None:
+        self.mo_running = False
+        self.mo_start_btn.config(state="normal")
+        self.mo_cancel_btn.config(state="disabled")
+        self.mo_eta.set("")
+        if error:
+            self.mo_progress.config(value=0)
+            self.mo_status.set("에러 또는 취소됨")
+            messagebox.showerror("모자이크 실패", error)
+            return
+        self.mo_progress.config(value=100)
+        self.mo_status.set(f"완료 · 저장 위치: {self.mo_output_path}")
+        body = f"저장됨:\n{self.mo_output_path}"
+        if warning:
+            messagebox.showwarning("모자이크 완료 (확인 필요)", f"{body}\n\n{warning}")
+        else:
+            messagebox.showinfo("모자이크 완료", body)
 
     # --------------------------------------------------------- highlight UI
     def _build_highlight_tab(self, parent: Frame) -> None:
