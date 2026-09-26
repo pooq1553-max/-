@@ -33,21 +33,44 @@ class DetectedFace:
 
 
 class FaceDetector:
-    def __init__(self, model_name: str = "buffalo_l", providers: Optional[List[str]] = None, det_size: int = 640):
+    """buffalo_l 기반 얼굴 검출기.
+
+    allowed_modules로 필요한 모델만 올릴 수 있다. buffalo_l은 검출 외에
+    랜드마크 2종·성별·인식 모델을 함께 올리는데, 용도에 따라 대부분
+    불필요하다. 예를 들어 모자이크는 얼굴 위치(bbox)만 있으면 되므로
+    ["detection"]만 올리면 메모리를 크게 아낀다.
+    """
+
+    #: 용도별로 필요한 최소 모듈
+    MODULES_DETECT_ONLY = ["detection"]
+    MODULES_GENDER = ["detection", "genderage"]
+    MODULES_IDENTITY = ["detection", "recognition"]
+
+    def __init__(
+        self,
+        model_name: str = "buffalo_l",
+        providers: Optional[List[str]] = None,
+        det_size: int = 640,
+        allowed_modules: Optional[List[str]] = None,
+    ):
         import insightface
 
         prov = providers or ["CPUExecutionProvider"]
+        kwargs = {"name": model_name, "providers": prov}
+        if allowed_modules is not None:
+            kwargs["allowed_modules"] = list(allowed_modules)
+
         # 메모리 아레나를 끄지 않으면 긴 영상 처리 중 사용량이 계속 불어난다.
         # 버전에 따라 sess_options를 못 받으면 기본 방식으로 되돌린다.
+        self.mem_arena_disabled = False
         try:
             import onnxruntime
             so = onnxruntime.SessionOptions()
             so.enable_cpu_mem_arena = False
-            self.app = insightface.app.FaceAnalysis(
-                name=model_name, providers=prov, sess_options=so
-            )
+            self.app = insightface.app.FaceAnalysis(sess_options=so, **kwargs)
+            self.mem_arena_disabled = True
         except Exception:
-            self.app = insightface.app.FaceAnalysis(name=model_name, providers=prov)
+            self.app = insightface.app.FaceAnalysis(**kwargs)
         self.app.prepare(ctx_id=0, det_size=(det_size, det_size))
 
     @staticmethod

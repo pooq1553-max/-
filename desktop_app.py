@@ -31,8 +31,10 @@ from PIL import Image, ImageTk
 from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import probe_video, swap_video
 from faceswap.identity import build_identity
-from faceswap.mosaic import mosaic_video
+from faceswap.mosaic import mosaic_video, modules_for_mode
 from faceswap.masks import preserve_expression
+from faceswap.detector import FaceDetector
+from faceswap import diag
 from faceswap.enhance import (
     FaceEnhancer,
     download_enhancer,
@@ -188,11 +190,17 @@ class FaceSwapApp:
         self._mo_cancel = False
         self._mo_proc_start: float | None = None
         self._mo_identity_cache = None
+        # 모자이크는 스왑 모델도, 랜드마크·인식 모델도 필요 없다. 대상 모드에
+        # 맞는 최소 모델만 올린 전용 검출기를 따로 둔다.
+        self._mo_detector: FaceDetector | None = None
+        self._mo_detector_modules: tuple | None = None
 
 
         self._build_ui()
         self._tray_icon = None
         self._setup_tray()
+        # 파이썬 예외 없이 프로세스가 죽는 경우를 잡기 위해 로그를 남긴다
+        self.log_path = diag.start()
 
     # ------------------------------------------------------------ UI --------
     def _build_ui(self) -> None:
@@ -556,7 +564,7 @@ class FaceSwapApp:
             self.enhancer = FaceEnhancer(enhancer_model_path())
         return self.enhancer
 
-    def _get_identity(self, pipe, paths, cache_attr: str, status_setter):
+    def _get_identity(self, detector, paths, cache_attr: str, status_setter):
         """소스 사진 목록에서 평균 정체성을 만든다 (같은 목록이면 캐시 재사용)."""
         paths = [p for p in (paths or []) if p]
         if not paths:
@@ -570,14 +578,14 @@ class FaceSwapApp:
             img = _imread_unicode(paths[0])
             if img is None:
                 raise RuntimeError("소스 사진을 열 수 없어요.")
-            faces = pipe.detector.detect(img)
+            faces = detector.detect(img)
             if not faces:
                 raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
-            face = pipe.detector.select(faces, "largest")
+            face = detector.select(faces, "largest")
         else:
             status_setter(f"소스 {len(paths)}장 분석 중...")
             face, report = build_identity(
-                pipe.detector, paths,
+                detector, paths,
                 progress=lambda p, m: status_setter(m),
             )
             status_setter(report.summary_ko())
@@ -619,7 +627,7 @@ class FaceSwapApp:
                 raise RuntimeError("타깃 사진을 열 수 없어요.")
 
             src_face = self._get_identity(
-                pipe, self.source_paths or [self.source_path],
+                pipe.detector, self.source_paths or [self.source_path],
                 cache_attr="_identity_cache",
                 status_setter=lambda s: self.root.after(0, self.status_var.set, s),
             )
@@ -784,6 +792,8 @@ class FaceSwapApp:
     def _video_progress(self, done: int, total: int, msg: str) -> None:
         pct, text, eta_text, self._video_proc_start = self._calc_progress(
             done, total, msg, self._video_proc_start)
+        if done > 0 and done % 100 == 0:
+            diag.write(f"스왑 {done}/{total} · {diag.memory_note()}")
         self.root.after(0, lambda: (self.v_progress.config(value=pct),
                                      self.v_status.set(text),
                                      self.v_eta.set(eta_text)))
@@ -791,6 +801,9 @@ class FaceSwapApp:
     def _mosaic_progress(self, done: int, total: int, msg: str) -> None:
         pct, text, eta_text, self._mo_proc_start = self._calc_progress(
             done, total, msg, self._mo_proc_start)
+        # 강제 종료되면 화면에 아무것도 안 남으므로 메모리 추이를 파일에 남긴다
+        if done > 0 and done % 100 == 0:
+            diag.write(f"모자이크 {done}/{total} · {diag.memory_note()}")
         self.root.after(0, lambda: (self.mo_progress.config(value=pct),
                                      self.mo_status.set(text),
                                      self.mo_eta.set(eta_text)))
@@ -807,7 +820,7 @@ class FaceSwapApp:
                         "여성 얼굴만": "female", "남성 얼굴만": "male"}
             target_mode = mode_map.get(self.v_target_mode.get(), "largest")
             src_face = self._get_identity(
-                pipe, self.v_source_paths or [self.v_source_path],
+                pipe.detector, self.v_source_paths or [self.v_source_path],
                 cache_attr="_v_identity_cache",
                 status_setter=lambda s: self.root.after(0, self.v_status.set, s),
             )
@@ -1078,18 +1091,31 @@ class FaceSwapApp:
         self.mo_status.set("시작 중...")
         threading.Thread(target=self._mosaic_worker, args=(mode,), daemon=True).start()
 
+    def _ensure_mosaic_detector(self, mode: str, status_setter) -> FaceDetector:
+        """이 모드에 필요한 최소 모델만 올린 검출기. 모드가 바뀌면 다시 만든다."""
+        modules = tuple(modules_for_mode(mode))
+        if self._mo_detector is not None and self._mo_detector_modules == modules:
+            return self._mo_detector
+        status_setter("검출기 준비 중...")
+        diag.write(f"모자이크 검출기 로딩: {list(modules)}")
+        self._mo_detector = FaceDetector(allowed_modules=list(modules))
+        self._mo_detector_modules = modules
+        diag.write(f"모자이크 검출기 준비 완료 · {diag.memory_note()}")
+        return self._mo_detector
+
     def _mosaic_worker(self, mode: str) -> None:
         _prevent_sleep()
         try:
-            pipe = self._ensure_pipeline(
-                lambda s: self.root.after(0, self.mo_status.set, s))
+            status = lambda s: self.root.after(0, self.mo_status.set, s)  # noqa: E731
+            diag.write(f"모자이크 시작 · 모드={mode} · {diag.memory_note()}")
+            detector = self._ensure_mosaic_detector(mode, status)
 
             ref_embedding = None
             if mode in ("match", "except_match"):
                 ref_face = self._get_identity(
-                    pipe, self.mo_ref_paths,
+                    detector, self.mo_ref_paths,
                     cache_attr="_mo_identity_cache",
-                    status_setter=lambda s: self.root.after(0, self.mo_status.set, s))
+                    status_setter=status)
                 ref_embedding = ref_face.embedding
 
             res_map = {"원본 유지": None, "720p (2배 빠름)": 720,
@@ -1098,7 +1124,7 @@ class FaceSwapApp:
 
             self._mo_proc_start = time.time()
             saved_path, warning = mosaic_video(
-                pipeline=pipe,
+                detector=detector,
                 target_video_path=self.mo_input_path,
                 output_video_path=self.mo_output_path,
                 mode=mode,

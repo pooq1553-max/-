@@ -17,7 +17,6 @@ import cv2
 import numpy as np
 
 from .detector import DetectedFace, FaceDetector
-from .pipeline import FaceSwapPipeline
 from .video import CancelPredicate, ProgressCallback, process_video
 
 # 대상 고르기 방식
@@ -133,8 +132,22 @@ def select_mosaic_targets(
     return picked
 
 
+def modules_for_mode(mode: str) -> List[str]:
+    """이 대상 모드에 실제로 필요한 검출기 모듈만 돌려준다.
+
+    모자이크는 얼굴 위치만 있으면 되므로 기본은 검출 모델 하나다. 성별로
+    고를 때만 genderage, 기준 인물을 쓸 때만 recognition이 추가로 필요하다.
+    스왑 모델(inswapper)은 어느 경우에도 필요 없다.
+    """
+    if mode in ("female", "male"):
+        return FaceDetector.MODULES_GENDER
+    if mode in ("match", "except_match"):
+        return FaceDetector.MODULES_IDENTITY
+    return FaceDetector.MODULES_DETECT_ONLY
+
+
 def mosaic_image(
-    pipeline: FaceSwapPipeline,
+    detector: FaceDetector,
     image_bgr: np.ndarray,
     mode: str = "all",
     reference_embedding: Optional[np.ndarray] = None,
@@ -145,9 +158,9 @@ def mosaic_image(
     padding: float = 0.15,
 ) -> Tuple[np.ndarray, int]:
     """사진 한 장의 얼굴을 가린다. 반환: (결과 이미지, 가린 얼굴 수)"""
-    faces = pipeline.detector.detect(image_bgr)
+    faces = detector.detect(image_bgr)
     targets = select_mosaic_targets(
-        pipeline.detector, faces, mode, reference_embedding, match_threshold
+        detector, faces, mode, reference_embedding, match_threshold
     )
     out = image_bgr
     for f in targets:
@@ -156,7 +169,7 @@ def mosaic_image(
 
 
 def mosaic_video(
-    pipeline: FaceSwapPipeline,
+    detector: FaceDetector,
     target_video_path: str | Path,
     output_video_path: str | Path,
     mode: str = "all",
@@ -186,11 +199,11 @@ def mosaic_video(
         ref = _unit(np.asarray(reference_embedding, dtype=np.float32))
 
     def frame_fn(frame: np.ndarray) -> np.ndarray:
-        faces = pipeline.detector.detect(frame)
+        faces = detector.detect(frame)
         if not faces:
             return frame
         targets = select_mosaic_targets(
-            pipeline.detector, faces, mode, ref, match_threshold
+            detector, faces, mode, ref, match_threshold
         )
         for f in targets:
             frame = apply_mosaic(frame, f.bbox, style, strength, shape, padding)
