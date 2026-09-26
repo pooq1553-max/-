@@ -92,14 +92,14 @@ set PSSCRIPT=%TEMP%\faceswap_shortcut.ps1
 > "%PSSCRIPT%" echo $WshShell = New-Object -ComObject WScript.Shell
 >>"%PSSCRIPT%" echo $lnk = [System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'FaceSwap.lnk')
 >>"%PSSCRIPT%" echo $s = $WshShell.CreateShortcut($lnk)
->>"%PSSCRIPT%" echo $s.TargetPath = '%CD%\run.bat'
+>>"%PSSCRIPT%" echo $s.TargetPath = '%CD%\desktop.bat'
 >>"%PSSCRIPT%" echo $s.WorkingDirectory = '%CD%'
 >>"%PSSCRIPT%" echo $s.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
 >>"%PSSCRIPT%" echo $s.Description = 'FaceSwap local app'
 >>"%PSSCRIPT%" echo $s.Save()
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PSSCRIPT%"
 if errorlevel 1 (
-    echo   ^(shortcut creation failed - you can just double-click run.bat instead^)
+    echo   ^(shortcut creation failed - you can just double-click desktop.bat instead^)
 ) else (
     echo   Desktop shortcut created: FaceSwap
 )
@@ -111,6 +111,6 @@ echo   Setup complete!
 echo ===============================================
 echo.
 echo Double-click the "FaceSwap" icon on your Desktop to launch.
-echo (Or double-click run.bat in this folder.)
+echo (Or double-click desktop.bat in this folder.)
 echo.
 pause

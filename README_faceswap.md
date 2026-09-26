@@ -1,79 +1,55 @@
 # faceswap
 
-CLI face-swap tool: takes a face from `--source`, replaces the face(s) in `--target`, writes the result.
+얼굴 스왑과 얼굴 모자이크를 하는 Windows 데스크톱 앱.
 
-Uses [InsightFace](https://github.com/deepinsight/insightface)'s `buffalo_l` for detection/landmarks and the `inswapper_128.onnx` swap model (SimSwap-family, ONNX).
+탭 세 개로 구성된다.
 
-## Quick start — Windows one-click
+| 탭 | 하는 일 |
+|---|---|
+| 사진 스왑 | 사진의 얼굴을 다른 얼굴로 교체 |
+| 동영상 스왑 | 동영상의 얼굴을 프레임마다 교체 |
+| 모자이크 | 얼굴을 픽셀화하거나 흐리게 해서 가림 |
 
-1. 이 레포를 ZIP으로 받아서 압축 풀기 (또는 `git clone`)
-2. 폴더에서 **`setup.bat` 더블클릭** (Python·라이브러리·모델 자동 설치, 5~10분)
-3. 바탕화면에 생긴 **FaceSwap** 아이콘 더블클릭 → 브라우저에 UI가 뜸
-4. 사진 두 장 드래그해서 올리고 **스왑 실행** 버튼
+얼굴 검출은 InsightFace의 `buffalo_l`, 스왑은 `inswapper_128.onnx`,
+화질 개선은 GFPGAN(ONNX)을 쓴다. 모두 onnxruntime으로 돌아가며
+사진과 영상은 전부 로컬에서만 처리된다. 밖으로 나가지 않는다.
 
-앱 종료는 콘솔 창을 닫으면 됨. 사진은 100% 로컬 처리, 어디로도 안 올라감.
+## 설치 (Windows)
 
-자세한 Windows 설치 안내와 트러블슈팅은 [WINDOWS.md](./WINDOWS.md).
+1. 이 저장소를 ZIP으로 받아 압축을 푼다
+2. **`setup.bat` 더블클릭** — Python·라이브러리·모델을 받고 바탕화면에 아이콘을 만든다 (5~10분)
+3. 바탕화면의 **FaceSwap** 아이콘 실행
 
-## Quick start — Colab (파이썬 설치 없이)
+자세한 안내와 문제 해결은 [WINDOWS.md](./WINDOWS.md).
 
-`faceswap_colab.ipynb`을 Google Colab에 열고 셀을 순서대로 실행. 사진 두 장
-업로드 → 결과 자동 다운로드. (사진은 구글 Colab 서버로 잠깐 올라감.)
+화질 개선 모델(약 330MB)은 앱에서 처음 켤 때 물어보고 받는다.
+미리 받으려면 `python download_models.py --enhancer`.
 
-## Install (Linux/Mac, 수동)
+## 명령줄로 사진 스왑
 
 ```bash
-pip install -r requirements.txt
-python download_models.py
-python app.py     # GUI (브라우저)
-# 또는 CLI
 python -m faceswap -s face.jpg -t body.jpg -o out.jpg
 ```
 
-`download_models.py` fetches `inswapper_128.onnx` (~554 MB) into `./models/`. InsightFace's detector weights download themselves on first run.
-
-## Usage
-
-```bash
-# put the face from face.jpg onto every face in group_photo.jpg
-python -m faceswap --source face.jpg --target group_photo.jpg --output out.jpg
-
-# only replace the largest face in the target
-python -m faceswap -s face.jpg -t group_photo.jpg -o out.jpg --target-face largest
-
-# CUDA if you have onnxruntime-gpu installed
-python -m faceswap -s face.jpg -t body.jpg -o out.jpg --device cuda
-```
-
-### Options
-
-| flag | default | meaning |
+| 옵션 | 기본값 | 설명 |
 |---|---|---|
-| `--source` / `-s` | (required) | image with the face to copy from |
-| `--target` / `-t` | (required) | image whose face(s) will be replaced |
-| `--output` / `-o` | (required) | where to write the result |
-| `--model` | `./models/inswapper_128.onnx` | path to the ONNX swap model |
-| `--device` | `cpu` | `cpu`, `cuda`, or `coreml` |
-| `--det-size` | `640` | detector input size |
-| `--source-face` | `largest` | `largest` / `first` / `index` |
+| `--source` / `-s` | (필수) | 얼굴을 가져올 사진 |
+| `--target` / `-t` | (필수) | 얼굴을 바꿀 사진 |
+| `--output` / `-o` | (필수) | 결과 저장 경로 |
+| `--device` | `cpu` | `cpu`, `cuda`, `coreml` |
 | `--target-face` | `all` | `all` / `largest` / `first` / `index` |
-| `--source-face-index` | `0` | index if `--source-face=index` |
-| `--target-face-index` | `0` | index if `--target-face=index` |
 
-### As a library
+## 알아둘 점
 
-```python
-from faceswap import FaceSwapPipeline
+- **소스 사진은 여러 장 고를수록 좋다.** 각도·표정이 다른 3~6장을 주면
+  평균을 내어 닮음 정도가 올라간다. 다른 사람이 섞이면 자동으로 걸러낸다.
+- **동영상은 오래 걸린다.** CPU 기준 30초 영상에 15~30분. 처리 해상도를
+  720p나 540p로 낮추면 2~5배 빨라진다. 화질 개선을 켜면 2~3배 느려진다.
+- 처리 중에는 절전이 자동으로 막히므로 화면을 잠그고 자리를 비워도 된다.
+- 중간에 중단돼도 `.partial.mp4` 파일이 남아 그때까지 처리분을 건질 수 있다.
 
-pipe = FaceSwapPipeline(swap_model_path="models/inswapper_128.onnx")
-pipe.swap_files("face.jpg", "body.jpg", "out.jpg")
-```
+## 사용 시 주의
 
-## Notes on quality
-
-- inswapper produces a 128×128 face patch; on high-res targets you may see softening. Optional GFPGAN/CodeFormer post-processing can sharpen it — not included here to keep the surface small.
-- Very off-angle or occluded target faces detect poorly. Try lowering `--det-size` or picking a clearer target.
-
-## Responsible use
-
-Only swap faces onto images with the consent of the people depicted. Do not use this to create sexual content of anyone, to impersonate real people, or to produce material meant to deceive. Many jurisdictions (KR, EU, US states) now criminalize non-consensual synthetic imagery — the legal responsibility for what you generate is yours.
+등장하는 사람의 동의를 받은 사진과 영상에만 사용할 것. 실제 인물을
+사칭하거나, 성적 콘텐츠를 만들거나, 속이려는 자료를 만드는 데 쓰지 말 것.
+한국을 포함한 여러 나라에서 비동의 합성물은 형사처벌 대상이다.
