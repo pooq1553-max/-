@@ -14,6 +14,9 @@ class DetectedFace:
     embedding: np.ndarray
     raw: object
     gender: int = -1  # 0 = 여성, 1 = 남성, -1 = 알 수 없음
+    # 68점 얼굴 랜드마크 (x, y). 입·눈 위치를 알아야 그 부분만 원본을
+    # 되살릴 수 있다. buffalo_l에 이미 포함된 모델이라 추가 비용이 없다.
+    landmark_68: Optional[np.ndarray] = None
 
     @property
     def area(self) -> float:
@@ -62,6 +65,16 @@ class FaceDetector:
         except (TypeError, ValueError):
             return -1
 
+    @staticmethod
+    def _read_landmark68(f) -> Optional[np.ndarray]:
+        lm = getattr(f, "landmark_3d_68", None)
+        if lm is None:
+            return None
+        arr = np.asarray(lm, dtype=np.float32)
+        if arr.ndim != 2 or arr.shape[0] != 68:
+            return None
+        return arr[:, :2]  # 3D 좌표 중 화면상 x, y만 쓴다
+
     def detect(self, image_bgr: np.ndarray) -> List[DetectedFace]:
         faces = self.app.get(image_bgr)
         return [
@@ -72,6 +85,7 @@ class FaceDetector:
                 embedding=np.asarray(getattr(f, "normed_embedding", getattr(f, "embedding", None)), dtype=np.float32),
                 raw=f,
                 gender=self._read_gender(f),
+                landmark_68=self._read_landmark68(f),
             )
             for f in faces
         ]

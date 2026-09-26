@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Tuple
 import cv2
 import numpy as np
 
+from .masks import preserve_expression
 from .pipeline import FaceSwapPipeline
 
 ProgressCallback = Callable[[int, int, str], None]
@@ -265,6 +266,8 @@ def swap_video(
     source_face=None,
     enhancer=None,
     enhance_blend: float = 0.8,
+    preserve_mouth: float = 0.0,
+    preserve_eyes: float = 0.0,
     progress: Optional[ProgressCallback] = None,
     cancel: Optional[CancelPredicate] = None,
 ) -> Tuple[Path, Optional[str]]:
@@ -288,14 +291,29 @@ def swap_video(
             raise RuntimeError("소스 사진에서 얼굴을 찾지 못했어요.")
         src_face = pipeline.detector.select(src_faces, "largest")
 
+    keep_expression = preserve_mouth > 0.0 or preserve_eyes > 0.0
+
     def frame_fn(frame: np.ndarray) -> np.ndarray:
         tgt_faces = pipeline.detector.detect(frame)
         if not tgt_faces:
             return frame
         to_replace = pipeline.detector.select_targets(tgt_faces, target_mode)
+        if not to_replace:
+            return frame
+
+        original = frame.copy() if keep_expression else None
         for tf in to_replace:
             frame = pipeline.swapper.swap(frame, tf, src_face)
-        if enhancer is not None and to_replace:
+
+        if keep_expression:
+            # 입·눈을 원본 픽셀로 되돌려 말하고 깜빡이는 움직임을 살린다.
+            # 화질 개선 전에 해야 되살린 부분까지 같이 다듬어져 자연스럽다.
+            frame = preserve_expression(
+                frame, original, to_replace,
+                mouth=preserve_mouth, eyes=preserve_eyes,
+            )
+
+        if enhancer is not None:
             # 스왑된 얼굴 자리를 그대로 다시 정렬해 화질 복원
             frame = enhancer.enhance_faces(frame, to_replace, blend=enhance_blend)
         return frame

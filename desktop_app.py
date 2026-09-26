@@ -32,6 +32,7 @@ from faceswap.pipeline import FaceSwapPipeline
 from faceswap.video import probe_video, swap_video
 from faceswap.identity import build_identity
 from faceswap.mosaic import mosaic_video
+from faceswap.masks import preserve_expression
 from faceswap.enhance import (
     FaceEnhancer,
     download_enhancer,
@@ -143,6 +144,8 @@ class FaceSwapApp:
         self.target_path: str | None = None
         self.result_bgr = None
         self.replace_all_photo = BooleanVar(value=False)
+        self.keep_mouth_photo = BooleanVar(value=True)
+        self.keep_eyes_photo = BooleanVar(value=False)
         self.status_var = StringVar(value="사진 두 장을 선택한 뒤 '스왑 실행' 버튼을 누르세요.")
 
         # video state
@@ -159,6 +162,11 @@ class FaceSwapApp:
         self.v_running = False
         self.v_resolution = StringVar(value="원본 유지")
         self.v_target_mode = StringVar(value="가장 큰 얼굴만")
+        # inswapper는 입 벌림 같은 큰 표정 변화를 잘 못 따라온다. 입을 원본
+        # 픽셀로 되돌리면 말하는 움직임이 살아나므로 기본으로 켜 둔다.
+        self.v_keep_mouth = BooleanVar(value=True)
+        self.v_keep_eyes = BooleanVar(value=False)
+        self.v_keep_strength = StringVar(value="보통")
         self.v_shutdown = BooleanVar(value=False)
         self._video_proc_start: float | None = None
 
@@ -232,6 +240,20 @@ class FaceSwapApp:
             ctrl,
             text="타깃의 모든 얼굴 교체 (기본: 가장 큰 얼굴만)",
             variable=self.replace_all_photo,
+        ).pack(side="left")
+
+        pkeep = Frame(parent, padx=8)
+        pkeep.pack(fill="x", pady=(0, 4))
+        Checkbutton(
+            pkeep, text="원본 입 모양 유지", variable=self.keep_mouth_photo,
+        ).pack(side="left")
+        Checkbutton(
+            pkeep, text="원본 눈 유지", variable=self.keep_eyes_photo,
+        ).pack(side="left", padx=(12, 0))
+        Label(
+            pkeep,
+            text="  타깃 사진이 입을 벌리고 있을 때 그 모양을 살립니다.",
+            fg="#666", font=("Segoe UI", 9),
         ).pack(side="left")
 
         enh = Frame(parent, padx=8)
@@ -329,6 +351,29 @@ class FaceSwapApp:
         Label(
             res_row,
             text="  결과 영상이 선택한 해상도로 저장됨. 낮을수록 빠르고 파일 작지만 화질 손해.",
+            fg="#666", font=("Segoe UI", 9),
+        ).pack(side="left")
+
+        keep = Frame(parent, padx=8)
+        keep.pack(fill="x", pady=(0, 4))
+        Checkbutton(
+            keep,
+            text="원본 입 모양 유지 (말하는 움직임 살리기)",
+            variable=self.v_keep_mouth,
+        ).pack(side="left")
+        Checkbutton(
+            keep,
+            text="원본 눈 유지 (깜빡임·시선)",
+            variable=self.v_keep_eyes,
+        ).pack(side="left", padx=(12, 0))
+        Label(keep, text="강도:").pack(side="left", padx=(12, 0))
+        ttk.Combobox(
+            keep, textvariable=self.v_keep_strength,
+            values=["약하게", "보통", "강하게"], state="readonly", width=8,
+        ).pack(side="left", padx=(6, 0))
+        Label(
+            keep,
+            text="  끄면 소스 사진의 다문 입이 그대로 붙습니다.",
             fg="#666", font=("Segoe UI", 9),
         ).pack(side="left")
 
@@ -589,6 +634,14 @@ class FaceSwapApp:
             for tf in to_replace:
                 result = pipe.swapper.swap(result, tf, src_face)
 
+            # 입·눈을 원본으로 되돌려 타깃의 표정을 살린다 (화질 개선 전에)
+            if self.keep_mouth_photo.get() or self.keep_eyes_photo.get():
+                result = preserve_expression(
+                    result, tgt_img, to_replace,
+                    mouth=0.8 if self.keep_mouth_photo.get() else 0.0,
+                    eyes=0.8 if self.keep_eyes_photo.get() else 0.0,
+                )
+
             if self.enhance_photo.get():
                 enhancer = self._get_enhancer(
                     lambda s: self.root.after(0, self.status_var.set, s))
@@ -765,6 +818,10 @@ class FaceSwapApp:
                     lambda s: self.root.after(0, self.v_status.set, s))
                 enhance_blend = self._STRENGTH_MAP.get(self.enhance_strength_v.get(), 0.8)
 
+            keep = self._STRENGTH_MAP.get(self.v_keep_strength.get(), 0.8)
+            keep_mouth = keep if self.v_keep_mouth.get() else 0.0
+            keep_eyes = keep if self.v_keep_eyes.get() else 0.0
+
             # 모델·정체성 준비가 모두 끝난 지금부터 재야 프레임 처리 속도가 정확하다
             self._video_proc_start = time.time()
             saved_path, warning = swap_video(
@@ -777,6 +834,8 @@ class FaceSwapApp:
                 source_face=src_face,
                 enhancer=enhancer,
                 enhance_blend=enhance_blend,
+                preserve_mouth=keep_mouth,
+                preserve_eyes=keep_eyes,
                 progress=self._video_progress,
                 cancel=lambda: self._cancel,
             )
