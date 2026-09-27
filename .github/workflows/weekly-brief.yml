@@ -5,6 +5,12 @@ on:
     # 일요일 08:45 KST (= 토요일 23:45 UTC) — 방송 전에 메일로 받는다
     - cron: '45 23 * * 6'
   workflow_dispatch:
+    inputs:
+      send_email:
+        description: '메일 보내기 (끄면 Actions 아티팩트로만 남음)'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   brief:
@@ -42,6 +48,7 @@ jobs:
           retention-days: 30
 
       - name: Send email
+        if: github.event_name == 'schedule' || inputs.send_email
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com

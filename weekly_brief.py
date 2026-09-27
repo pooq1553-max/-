@@ -265,29 +265,32 @@ def _num(x):
 
 def fetch_naver_investors(kr_days):
     """KRX 로그인 없이 네이버 금융 '투자자별 매매동향(일별)'로 주간 순매수 합계를 낸다. 단위: 원."""
+    import re
     import requests
 
     days = {pd.Timestamp(d).strftime("%y.%m.%d") for d in kr_days}
     bizdate = pd.Timestamp(kr_days[-1]).strftime("%Y%m%d")
+    strip = lambda h: re.sub(r"<[^>]+>|&nbsp;", " ", h).strip()
     out = {}
     for mkt, sosok in (("KOSPI", "01"), ("KOSDAQ", "02")):
-        tot, hit = {"외국인": 0.0, "기관": 0.0, "개인": 0.0}, set()
+        tot, hit, html = {"외국인": 0.0, "기관": 0.0, "개인": 0.0}, set(), ""
         try:
             for page in (1, 2):
                 url = ("https://finance.naver.com/sise/investorDealTrendDay.naver"
                        f"?bizdate={bizdate}&sosok={sosok}&page={page}")
                 res = requests.get(url, timeout=10, headers={
-                    "User-Agent": "Mozilla/5.0", "Referer": "https://finance.naver.com/"})
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "Referer": "https://finance.naver.com/sise/sise_trans_style.naver"})
                 html = res.content.decode("euc-kr", "replace")
-                for tb in pd.read_html(StringIO(html)):
-                    for row in tb.itertuples(index=False):
-                        d = str(row[0]).strip()
-                        if d in days and d not in hit and len(row) >= 4:
-                            hit.add(d)
-                            # 열 순서: 날짜, 개인, 외국인, 기관계, ... (억원)
-                            tot["개인"] += _num(row[1])
-                            tot["외국인"] += _num(row[2])
-                            tot["기관"] += _num(row[3])
+                # 행 단위로 셀을 뽑는다: 날짜, 개인, 외국인, 기관계, ... (억원)
+                for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+                    cells = [strip(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
+                    if len(cells) < 4 or cells[0] not in days or cells[0] in hit:
+                        continue
+                    hit.add(cells[0])
+                    tot["개인"] += _num(cells[1])
+                    tot["외국인"] += _num(cells[2])
+                    tot["기관"] += _num(cells[3])
                 if hit >= days:
                     break
                 time.sleep(0.3)
@@ -297,6 +300,10 @@ def fetch_naver_investors(kr_days):
             out[mkt] = {k: v * 1e8 for k, v in tot.items()}
         print(f"  [국장] 네이버 투자자별({mkt}) {len(hit)}/{len(days)}일 "
               + " ".join(f"{k} {v:+,.0f}억" for k, v in tot.items()), file=sys.stderr)
+        if not hit and html:
+            dates = re.findall(r"\d{2}\.\d{2}\.\d{2}", html)[:5]
+            print(f"    진단: 길이 {len(html)} · 찾던 날짜 {sorted(days)} · 페이지 날짜 {dates}", file=sys.stderr)
+            print(f"    진단: {strip(html)[:300]!r}", file=sys.stderr)
     return out
 
 
