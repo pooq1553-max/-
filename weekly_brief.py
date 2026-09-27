@@ -573,6 +573,12 @@ def render_text(p):
     add(f"{p['title']} 주간 시황 브리핑")
     add(f"미장 {p['week_us']} · 국장 {p['week_kr']}" + (" · 샘플 데이터" if p["demo"] else ""))
     add("")
+    if p.get("notes"):
+        add("■ 이번 주 방송 포인트")
+        for i, n in enumerate(p["notes"], 1):
+            add(f"  {i}. {n['h']}")
+            add(f"     {n['b'].replace('**', '')}")
+        add("")
     add("■ 이번 주 핵심")
     for x in p["summary"]:
         add(f"  · {x['k']}: {x['v']}")
@@ -684,7 +690,7 @@ def fmt_krw(v):
 
 # ───────────────────────── 렌더링 ─────────────────────────
 
-PAGE = r"""<title>주간 시황 브리핑</title>
+PAGE = r"""<title>__TITLE__</title>
 <style>
 :root{
   --bg:#f4f5f7; --panel:#ffffff; --panel-2:#f7f8fa;
@@ -757,7 +763,7 @@ h2{font-size:clamp(24px,3.2vw,36px);margin:6px 0 4px;letter-spacing:-.01em}
 
 /* 타일 */
 .tile .nm{font-size:13px;color:var(--ink-2);font-weight:600}
-.tile .v{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-top:2px}
+.tile .v{font-size:clamp(20px,2.1vw,26px);white-space:nowrap;font-weight:800;letter-spacing:-.01em;margin-top:2px}
 .tile .c{font-size:15px;font-weight:700}
 .tile svg{display:block;width:100%;height:44px;margin-top:8px}
 .tile.big .v{font-size:32px}
@@ -807,6 +813,14 @@ tr:hover td{background:var(--panel-2)}
   border-radius:10px;padding:8px 10px;font-size:12.5px;box-shadow:var(--shadow);max-width:260px;opacity:0;transition:opacity .08s}
 .tip b{display:block;font-size:13px;margin-bottom:2px}
 .note{min-height:140px;padding:14px;border:1px dashed var(--line);border-radius:10px;background:var(--panel-2);outline:none;font-size:16px;white-space:pre-wrap}
+.story{display:grid;gap:12px;margin:0;padding:0;list-style:none;counter-reset:st}
+.story li{display:grid;grid-template-columns:44px 1fr;gap:4px 14px;padding:18px 20px;background:var(--panel);
+  border:1px solid var(--line);border-radius:14px;counter-increment:st}
+.story li::before{content:counter(st);grid-row:span 3;font-size:28px;font-weight:800;color:var(--ink-3);line-height:1.1}
+.story .tag{justify-self:start;margin:0;font-size:11.5px}
+.story h3{margin:0;font-size:clamp(17px,2vw,21px);line-height:1.35;text-wrap:balance}
+.story p{margin:4px 0 0;color:var(--ink-2);font-size:15.5px;line-height:1.7;max-width:70ch}
+.story b{color:var(--ink)}
 .empty{color:var(--ink-3);font-size:14px;padding:12px 0}
 footer{color:var(--ink-3);font-size:12px;text-align:center;padding:20px}
 
@@ -936,6 +950,17 @@ const idx = D.indices, byG = g => idx.filter(i => i.g === g);
   D.summary.forEach(x => sm.insertAdjacentHTML("beforeend", `<div><b>${esc(x.k)}</b><span>${esc(x.v)}</span></div>`));
   s.appendChild(sm);
   app.appendChild(s); secs.push(["open", "오프닝"]);
+}
+
+/* 1-1. 방송 원고 */
+if (D.notes && D.notes.length) {
+  const s = section("story", "방송 포인트", "이번 주 방송 포인트", D.notes_lede ? esc(D.notes_lede) : "방송 순서대로 정리한 이번 주 이야기");
+  const ol = document.createElement("ol"); ol.className = "story";
+  // 본문은 **굵게**만 허용
+  const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  D.notes.forEach(n => ol.insertAdjacentHTML("beforeend",
+    `<li>${n.tag ? `<span class="tag">${esc(n.tag)}</span>` : ""}<h3>${esc(n.h)}</h3><p>${md(n.b)}</p></li>`));
+  s.appendChild(ol);
 }
 
 /* 2. 매크로 */
@@ -1128,7 +1153,8 @@ def render_html(payload):
         return o
     data = json.dumps(clean(payload), separators=(",", ":"), ensure_ascii=False)
     data = data.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    return PAGE.replace("__DATA__", data)
+    title = f"{payload.get('title', '')} 주간 시황".strip()
+    return PAGE.replace("__TITLE__", title.replace("<", "")).replace("__DATA__", data)
 
 
 def main():
@@ -1141,11 +1167,15 @@ def main():
     ap.add_argument("--pdf", help="PDF 경로 (playwright 필요)")
     ap.add_argument("--json", help="집계 데이터(.json) 저장 경로")
     ap.add_argument("--from-json", help="저장해 둔 집계 데이터로 다시 그리기 (수집 생략)")
+    ap.add_argument("--notes", help="방송 원고 JSON ([{tag,h,b}, ...]) — 페이지 앞부분에 넣는다")
     args = ap.parse_args()
 
     if args.from_json:
         with open(args.from_json, encoding="utf-8") as f:
             payload = json.load(f)
+        if args.notes:
+            with open(args.notes, encoding="utf-8") as f:
+                payload["notes"] = json.load(f)
         write_outputs(payload, args)
         return
 
