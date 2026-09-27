@@ -1,9 +1,14 @@
 name: Weekly Live Brief
+run-name: ${{ inputs.notes != '' && inputs.send_email && 'Weekly Live Brief (원고 포함 발송)' || 'Weekly Live Brief' }}
 
+# 평소 흐름: 일요일 아침 Claude 예약 작업이 이 워크플로우를 두 번 수동 실행한다.
+#   1) print_data=true, send_email=false 로 데이터를 받아 방송 원고를 쓰고
+#   2) notes(원고)와 link(보고서 주소)를 넣어 메일 발송
+# 아래 스케줄은 그 작업이 실패했을 때만 메일을 보내는 예비 실행이다.
 on:
   schedule:
-    # 일요일 08:45 KST (= 토요일 23:45 UTC) — 방송 전에 메일로 받는다
-    - cron: '45 23 * * 6'
+    # 일요일 10:45 KST (= 01:45 UTC)
+    - cron: '45 1 * * 0'
   workflow_dispatch:
     inputs:
       send_email:
@@ -16,9 +21,44 @@ on:
         required: false
         default: false
         type: boolean
+      notes:
+        description: '방송 원고 JSON ([{"tag","h","b"}, ...])'
+        required: false
+        default: ''
+        type: string
+      link:
+        description: '온라인 보고서 주소 (메일 본문 맨 위에 표시)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  actions: read
 
 jobs:
+  # 예비 실행(스케줄)은 오늘 원고 포함 메일이 이미 나갔으면 건너뛴다
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - name: Check already sent
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then echo "go=true" >> $GITHUB_OUTPUT; exit 0; fi
+          since=$(date -u -d '12 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          n=$(gh run list -R "${{ github.repository }}" --workflow weekly-brief.yml --status success \
+                --created ">=$since" --json displayTitle \
+                --jq '[.[] | select(.displayTitle | contains("원고 포함"))] | length')
+          echo "원고 포함 발송 ${n}건 (최근 12시간)"
+          if [ "$n" -gt 0 ]; then echo "go=false" >> $GITHUB_OUTPUT; else echo "go=true" >> $GITHUB_OUTPUT; fi
+
   brief:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,11 +82,16 @@ jobs:
           # 없으면 네이버(투자자별 순매수) + yfinance(특징주·테마 ETF)로 대체한다.
           KRX_ID: ${{ secrets.KRX_ID }}
           KRX_PW: ${{ secrets.KRX_PW }}
+          NOTES: ${{ inputs.notes }}
+          LINK: ${{ inputs.link }}
         run: |
           mkdir -p reports
           TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
           echo "TODAY=$TODAY" >> $GITHUB_ENV
-          python3 weekly_brief.py -o reports/weekly_brief_$TODAY.html \
+          EXTRA=()
+          if [ -n "$NOTES" ]; then printf '%s' "$NOTES" > notes.json; EXTRA+=(--notes notes.json); fi
+          if [ -n "$LINK" ]; then EXTRA+=(--link "$LINK"); fi
+          python3 weekly_brief.py "${EXTRA[@]}" -o reports/weekly_brief_$TODAY.html \
             --pdf reports/weekly_brief_$TODAY.pdf \
             --text reports/weekly_brief_$TODAY.txt \
             --json reports/weekly_brief_$TODAY.json

@@ -572,6 +572,9 @@ def render_text(p):
     add = L.append
     add(f"{p['title']} 주간 시황 브리핑")
     add(f"미장 {p['week_us']} · 국장 {p['week_kr']}" + (" · 샘플 데이터" if p["demo"] else ""))
+    if p.get("link"):
+        add("")
+        add(f"▶ 차트까지 보기 (폰·PC 바로 열림): {p['link']}")
     add("")
     if p.get("notes"):
         add("■ 이번 주 방송 포인트")
@@ -1168,14 +1171,12 @@ def main():
     ap.add_argument("--json", help="집계 데이터(.json) 저장 경로")
     ap.add_argument("--from-json", help="저장해 둔 집계 데이터로 다시 그리기 (수집 생략)")
     ap.add_argument("--notes", help="방송 원고 JSON ([{tag,h,b}, ...]) — 페이지 앞부분에 넣는다")
+    ap.add_argument("--link", help="온라인 보고서 주소 — 메일 본문 맨 위에 표시")
     args = ap.parse_args()
 
     if args.from_json:
         with open(args.from_json, encoding="utf-8") as f:
             payload = json.load(f)
-        if args.notes:
-            with open(args.notes, encoding="utf-8") as f:
-                payload["notes"] = json.load(f)
         write_outputs(payload, args)
         return
 
@@ -1240,6 +1241,11 @@ def main():
 
 
 def write_outputs(payload, args):
+    if args.notes:
+        with open(args.notes, encoding="utf-8") as f:
+            payload["notes"] = json.load(f)
+    if args.link:
+        payload["link"] = args.link
     html = render_html(payload)
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(html)
