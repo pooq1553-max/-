@@ -28,7 +28,7 @@ jobs:
         run: pip install yfinance pandas matplotlib numpy pykrx requests lxml html5lib beautifulsoup4
 
       - name: Probe naver (temporary)
-        run: python3 probe_naver.py
+        run: python3 probe_naver.py && exit 1
 
       - name: Build weekly brief
         env:
