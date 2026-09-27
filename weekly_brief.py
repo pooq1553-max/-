@@ -420,6 +420,44 @@ def stats(df, week, prev_day):
     )
 
 
+# 요일별 흐름 표에 넣을 시리즈: (심볼, 이름, 표시 방식)
+DAILY_US = [("^GSPC", "S&P 500", "pct"), ("^IXIC", "나스닥", "pct"), ("^RUT", "러셀2000", "pct"),
+            ("^SOX", "반도체", "pct"), ("^TNX", "10년물", "bp"), ("^VIX", "VIX", "lvl"),
+            ("CL=F", "WTI", "pct")]
+DAILY_KR = [("^KS11", "코스피", "pct"), ("^KQ11", "코스닥", "pct"), ("KRW=X", "원/달러", "won")]
+WEEKDAY = "월화수목금토일"
+
+
+def daily_moves(frames, series, week, prev_day):
+    """이번 주 거래일별 등락. 금리는 bp, VIX는 수준, 환율은 원 단위 변화."""
+    days = [d for d in week]
+    out = dict(dates=[f"{d:%m/%d}({WEEKDAY[d.weekday()]})" for d in days],
+               iso=[f"{d:%Y-%m-%d}" for d in days], cols=[])
+    for sym, name, kind in series:
+        df = frames.get(sym)
+        if df is None:
+            continue
+        c = df["Close"]
+        vals = []
+        prev = float(c.loc[prev_day]) if prev_day in c.index else None
+        for d in days:
+            cur = float(c.loc[d]) if d in c.index else None
+            if cur is None or prev is None:
+                vals.append(None)
+            elif kind == "bp":
+                vals.append(round((cur - prev) * 100))
+            elif kind == "lvl":
+                vals.append(round(cur, 1))
+            elif kind == "won":
+                vals.append(round(cur - prev, 1) + 0.0)
+            else:
+                vals.append(round((cur / prev - 1) * 100, 2) + 0.0)  # -0.0 방지
+            if cur is not None:
+                prev = cur
+        out["cols"].append(dict(name=name, kind=kind, v=vals))
+    return out
+
+
 def build_payload(frames, kr, earnings, demo):
     spine = frames["^GSPC"].index
     week, prev_day = week_split(spine)
@@ -427,6 +465,9 @@ def build_payload(frames, kr, earnings, demo):
 
     def st(sym, wk=week, pv=prev_day):
         return stats(frames[sym], wk, pv) if sym in frames else None
+
+    daily = dict(us=daily_moves(frames, DAILY_US, week, prev_day),
+                 kr=daily_moves(frames, DAILY_KR, kr_week, kr_prev))
 
     indices = []
     for sym, name, grp in INDICES:
@@ -514,7 +555,7 @@ def build_payload(frames, kr, earnings, demo):
         indices=indices, macro=macro, sectors=sectors, styles=styles,
         themes=themes, movers=movers, nh_total=nh_total, universe=len(stocks),
         breadth=round(sum(1 for s in stocks.values() if s["wk"] > 0) / max(len(stocks), 1) * 100),
-        kr=kr or {}, kr_etfs=kr_etfs, earnings=earnings or [],
+        kr=kr or {}, kr_etfs=kr_etfs, earnings=earnings or [], daily=daily,
     )
     p["summary"] = summarize(p)
     return p
@@ -587,6 +628,23 @@ def render_text(p):
         add(f"  · {x['k']}: {x['v']}")
 
     add("")
+    dd = (p.get("daily") or {}).get("us")
+    if dd and dd.get("dates"):
+        evs = {}
+        for e in p.get("events") or []:
+            evs.setdefault(e["date"], []).append(e)
+        add("■ 요일별 흐름 (미장)")
+        for i, d in enumerate(dd["dates"]):
+            parts = []
+            for c in dd["cols"]:
+                v = c["v"][i]
+                if v is None or c["kind"] == "lvl":
+                    continue
+                parts.append(f"{c['name']} {v:+d}bp" if c["kind"] == "bp" else f"{c['name']} {v:+.2f}%")
+            add(f"  {d}  " + " · ".join(parts))
+            for e in evs.get(dd["iso"][i], []):
+                add(f"      → {e['h']}: {e['b'].replace('**', '')}")
+        add("")
     add("■ 지수 (주간 / 1개월)")
     for i in p["indices"]:
         add(f"  {i['name']:<10} {i['last']:>12,.2f}   {sg(i['wk']):>8}   {sg(i['m1']):>8}")
@@ -824,6 +882,16 @@ tr:hover td{background:var(--panel-2)}
 .story h3{margin:0;font-size:clamp(17px,2vw,21px);line-height:1.35;text-wrap:balance}
 .story p{margin:4px 0 0;color:var(--ink-2);font-size:15.5px;line-height:1.7;max-width:70ch}
 .story b{color:var(--ink)}
+.story .src,.tl .src{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:12px}
+.src a{color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}
+.src a:hover{color:var(--ink)}
+.tl table{min-width:760px}
+.tl td,.tl th{vertical-align:top}
+.tl td.ev{white-space:normal;text-align:left;min-width:260px;max-width:520px;color:var(--ink-2);line-height:1.55}
+.tl td.ev .eh{color:var(--ink);display:block;margin-bottom:2px}
+.tl td.ev b{color:var(--ink)}
+.story li>*{grid-column:2}
+.tl td.day{font-weight:700}
 .empty{color:var(--ink-3);font-size:14px;padding:12px 0}
 footer{color:var(--ink-3);font-size:12px;text-align:center;padding:20px}
 
@@ -955,15 +1023,44 @@ const idx = D.indices, byG = g => idx.filter(i => i.g === g);
   app.appendChild(s); secs.push(["open", "오프닝"]);
 }
 
+// 원고 본문은 **굵게**만 허용
+const md = t => esc(t || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+const srcs = list => (list && list.length) ? `<span class="src">` + list.map(x =>
+  `<a href="${esc(x.u)}" target="_blank" rel="noopener">${esc(x.t || "출처")}</a>`).join("") + `</span>` : "";
+
 /* 1-1. 방송 원고 */
 if (D.notes && D.notes.length) {
   const s = section("story", "방송 포인트", "이번 주 방송 포인트", D.notes_lede ? esc(D.notes_lede) : "방송 순서대로 정리한 이번 주 이야기");
   const ol = document.createElement("ol"); ol.className = "story";
-  // 본문은 **굵게**만 허용
-  const md = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   D.notes.forEach(n => ol.insertAdjacentHTML("beforeend",
-    `<li>${n.tag ? `<span class="tag">${esc(n.tag)}</span>` : ""}<h3>${esc(n.h)}</h3><p>${md(n.b)}</p></li>`));
+    `<li>${n.tag ? `<span class="tag">${esc(n.tag)}</span>` : ""}<h3>${esc(n.h)}</h3><p>${md(n.b)}</p>${srcs(n.src)}</li>`));
   s.appendChild(ol);
+}
+
+/* 1-2. 요일별 흐름 */
+if (D.daily && D.daily.us && D.daily.us.dates.length) {
+  const s = section("days", "요일별 흐름", "요일별 흐름 — 무슨 날 출렁였나",
+    "하루 단위 등락과 그날 시장을 움직인 발언·뉴스. 금리는 bp 변화, VIX는 종가 수준.");
+  const ev = {};
+  (D.events || []).forEach(e => (ev[e.date] = ev[e.date] || []).push(e));
+  const cell = (c, v) => {
+    if (v === null || v === undefined) return `<td class="muted">–</td>`;
+    if (c.kind === "bp") return `<td class="${cls(v)}">${v > 0 ? "+" : ""}${v}bp</td>`;
+    if (c.kind === "lvl") return `<td>${v.toFixed(1)}</td>`;
+    if (c.kind === "won") return `<td class="${cls(-v)}">${v > 0 ? "+" : ""}${v.toFixed(1)}원</td>`;
+    return `<td class="${cls(v)}"><b>${pc(v)}</b></td>`;
+  };
+  const table = (dd, title, withEv) => {
+    const head = `<tr><th>날짜</th>${dd.cols.map(c => `<th>${esc(c.name)}</th>`).join("")}${withEv ? "<th style='text-align:left'>무슨 일이 있었나</th>" : ""}</tr>`;
+    const rows = dd.dates.map((d, i) => {
+      const es = ev[dd.iso[i]] || [];
+      const evc = withEv ? `<td class="ev">${es.map(e => `<strong class="eh">${esc(e.h)}</strong>${md(e.b)}${srcs(e.src)}`).join("<br>") || "<span class='muted'>–</span>"}</td>` : "";
+      return `<tr><td class="day">${esc(d)}</td>${dd.cols.map(c => cell(c, c.v[i])).join("")}${evc}</tr>`;
+    }).join("");
+    return card(s, title, "", `<div class="tbl tl"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`);
+  };
+  table(D.daily.us, "미장", true);
+  if (D.daily.kr && D.daily.kr.dates.length) table(D.daily.kr, "국장", (D.events || []).some(e => D.daily.kr.iso.includes(e.date) && e.mkt === "KR")).style.marginTop = "14px";
 }
 
 /* 2. 매크로 */
@@ -1172,6 +1269,7 @@ def main():
     ap.add_argument("--from-json", help="저장해 둔 집계 데이터로 다시 그리기 (수집 생략)")
     ap.add_argument("--notes", help="방송 원고 JSON ([{tag,h,b}, ...]) — 페이지 앞부분에 넣는다")
     ap.add_argument("--link", help="온라인 보고서 주소 — 메일 본문 맨 위에 표시")
+    ap.add_argument("--events", help="요일별 발언·뉴스 JSON ([{date:'YYYY-MM-DD', h, b, src:[{t,u}]}, ...])")
     args = ap.parse_args()
 
     if args.from_json:
@@ -1246,6 +1344,9 @@ def write_outputs(payload, args):
             payload["notes"] = json.load(f)
     if args.link:
         payload["link"] = args.link
+    if args.events:
+        with open(args.events, encoding="utf-8") as f:
+            payload["events"] = json.load(f)
     html = render_html(payload)
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(html)
