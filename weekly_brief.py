@@ -80,7 +80,7 @@ KR_ETFS = [
     ("102970.KS", "증권"), ("140700.KS", "보험"), ("117700.KS", "건설"),
     ("117680.KS", "철강"), ("117460.KS", "에너지화학"), ("140710.KS", "운송"),
     ("228790.KS", "화장품"), ("266410.KS", "필수소비재"), ("228810.KS", "미디어/엔터"),
-    ("300950.KS", "게임"), ("157490.KS", "소프트웨어"), ("098560.KS", "방송통신"),
+    ("300950.KS", "게임"), ("157490.KS", "소프트웨어"),
 ]
 
 US_MIN_DV = 20e6     # 특징주 최소 일평균 거래대금 ($)
@@ -264,46 +264,33 @@ def _num(x):
 
 
 def fetch_naver_investors(kr_days):
-    """KRX 로그인 없이 네이버 금융 '투자자별 매매동향(일별)'로 주간 순매수 합계를 낸다. 단위: 원."""
-    import re
+    """KRX 로그인 없이 네이버 증권 API로 투자자별 일별 순매수를 받아 주간 합계를 낸다. 단위: 원."""
     import requests
 
-    days = {pd.Timestamp(d).strftime("%y.%m.%d") for d in kr_days}
-    bizdate = pd.Timestamp(kr_days[-1]).strftime("%Y%m%d")
-    strip = lambda h: re.sub(r"<[^>]+>|&nbsp;", " ", h).strip()
     out = {}
-    for mkt, sosok in (("KOSPI", "01"), ("KOSDAQ", "02")):
-        tot, hit, html = {"외국인": 0.0, "기관": 0.0, "개인": 0.0}, set(), ""
-        try:
-            for page in (1, 2):
-                url = ("https://finance.naver.com/sise/investorDealTrendDay.naver"
-                       f"?bizdate={bizdate}&sosok={sosok}&page={page}")
-                res = requests.get(url, timeout=10, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                    "Referer": "https://finance.naver.com/sise/sise_trans_style.naver"})
-                html = res.content.decode("euc-kr", "replace")
-                # 행 단위로 셀을 뽑는다: 날짜, 개인, 외국인, 기관계, ... (억원)
-                for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
-                    cells = [strip(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
-                    if len(cells) < 4 or cells[0] not in days or cells[0] in hit:
-                        continue
-                    hit.add(cells[0])
-                    tot["개인"] += _num(cells[1])
-                    tot["외국인"] += _num(cells[2])
-                    tot["기관"] += _num(cells[3])
-                if hit >= days:
-                    break
-                time.sleep(0.3)
-        except Exception as e:
-            print(f"  [국장] 네이버 투자자별({mkt}) 실패: {e}", file=sys.stderr)
-        if hit:
+    for mkt in ("KOSPI", "KOSDAQ"):
+        tot, got = {"외국인": 0.0, "기관": 0.0, "개인": 0.0}, 0
+        for d in kr_days:
+            day = pd.Timestamp(d).strftime("%Y%m%d")
+            try:
+                res = requests.get(f"https://m.stock.naver.com/api/index/{mkt}/trend",
+                                   params={"bizdate": day}, timeout=10,
+                                   headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"})
+                j = res.json()
+                if j.get("bizdate") != day:     # 휴장일 등은 다른 날짜가 돌아온다
+                    continue
+                # 값은 억원 단위 문자열 ("+3,189")
+                tot["외국인"] += _num(j.get("foreignValue"))
+                tot["기관"] += _num(j.get("institutionalValue"))
+                tot["개인"] += _num(j.get("personalValue"))
+                got += 1
+            except Exception as e:
+                print(f"  [국장] 네이버 투자자별({mkt} {day}) 실패: {e}", file=sys.stderr)
+            time.sleep(0.2)
+        if got:
             out[mkt] = {k: v * 1e8 for k, v in tot.items()}
-        print(f"  [국장] 네이버 투자자별({mkt}) {len(hit)}/{len(days)}일 "
+        print(f"  [국장] 네이버 투자자별({mkt}) {got}/{len(kr_days)}일 "
               + " ".join(f"{k} {v:+,.0f}억" for k, v in tot.items()), file=sys.stderr)
-        if not hit and html:
-            dates = re.findall(r"\d{2}\.\d{2}\.\d{2}", html)[:5]
-            print(f"    진단: 길이 {len(html)} · 찾던 날짜 {sorted(days)} · 페이지 날짜 {dates}", file=sys.stderr)
-            print(f"    진단: {strip(html)[:300]!r}", file=sys.stderr)
     return out
 
 
