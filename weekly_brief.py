@@ -449,9 +449,9 @@ def daily_moves(frames, series, week, prev_day):
             elif kind == "lvl":
                 vals.append(round(cur, 1))
             elif kind == "won":
-                vals.append(round(cur - prev, 1))
+                vals.append(round(cur - prev, 1) + 0.0)
             else:
-                vals.append(round((cur / prev - 1) * 100, 2))
+                vals.append(round((cur / prev - 1) * 100, 2) + 0.0)  # -0.0 방지
             if cur is not None:
                 prev = cur
         out["cols"].append(dict(name=name, kind=kind, v=vals))
@@ -888,7 +888,9 @@ tr:hover td{background:var(--panel-2)}
 .tl table{min-width:760px}
 .tl td,.tl th{vertical-align:top}
 .tl td.ev{white-space:normal;text-align:left;min-width:260px;max-width:520px;color:var(--ink-2);line-height:1.55}
-.tl td.ev b{color:var(--ink);display:block;margin-bottom:2px}
+.tl td.ev .eh{color:var(--ink);display:block;margin-bottom:2px}
+.tl td.ev b{color:var(--ink)}
+.story li>*{grid-column:2}
 .tl td.day{font-weight:700}
 .empty{color:var(--ink-3);font-size:14px;padding:12px 0}
 footer{color:var(--ink-3);font-size:12px;text-align:center;padding:20px}
@@ -1052,7 +1054,7 @@ if (D.daily && D.daily.us && D.daily.us.dates.length) {
     const head = `<tr><th>날짜</th>${dd.cols.map(c => `<th>${esc(c.name)}</th>`).join("")}${withEv ? "<th style='text-align:left'>무슨 일이 있었나</th>" : ""}</tr>`;
     const rows = dd.dates.map((d, i) => {
       const es = ev[dd.iso[i]] || [];
-      const evc = withEv ? `<td class="ev">${es.map(e => `<b>${esc(e.h)}</b>${md(e.b)}${srcs(e.src)}`).join("<br>") || "<span class='muted'>–</span>"}</td>` : "";
+      const evc = withEv ? `<td class="ev">${es.map(e => `<strong class="eh">${esc(e.h)}</strong>${md(e.b)}${srcs(e.src)}`).join("<br>") || "<span class='muted'>–</span>"}</td>` : "";
       return `<tr><td class="day">${esc(d)}</td>${dd.cols.map(c => cell(c, c.v[i])).join("")}${evc}</tr>`;
     }).join("");
     return card(s, title, "", `<div class="tbl tl"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`);
