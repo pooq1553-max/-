@@ -31,6 +31,11 @@ on:
         required: false
         default: ''
         type: string
+      events:
+        description: '요일별 발언·뉴스 JSON ([{"date","h","b","src"}, ...])'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -84,6 +89,7 @@ jobs:
           KRX_PW: ${{ secrets.KRX_PW }}
           NOTES: ${{ inputs.notes }}
           LINK: ${{ inputs.link }}
+          EVENTS: ${{ inputs.events }}
         run: |
           mkdir -p reports
           TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
@@ -91,6 +97,7 @@ jobs:
           EXTRA=()
           if [ -n "$NOTES" ]; then printf '%s' "$NOTES" > notes.json; EXTRA+=(--notes notes.json); fi
           if [ -n "$LINK" ]; then EXTRA+=(--link "$LINK"); fi
+          if [ -n "$EVENTS" ]; then printf '%s' "$EVENTS" > events.json; EXTRA+=(--events events.json); fi
           python3 weekly_brief.py "${EXTRA[@]}" -o reports/weekly_brief_$TODAY.html \
             --pdf reports/weekly_brief_$TODAY.pdf \
             --text reports/weekly_brief_$TODAY.txt \
