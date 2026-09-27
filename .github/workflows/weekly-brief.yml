@@ -19,9 +19,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance pandas matplotlib numpy pykrx
+        run: pip install yfinance pandas matplotlib numpy pykrx requests lxml html5lib beautifulsoup4
 
       - name: Build weekly brief
+        env:
+          # 선택: KRX 데이터 계정이 있으면 외국인·기관 순매수 TOP과 업종 등락까지 나온다.
+          # 없으면 네이버(투자자별 순매수) + yfinance(특징주·테마 ETF)로 대체한다.
+          KRX_ID: ${{ secrets.KRX_ID }}
+          KRX_PW: ${{ secrets.KRX_PW }}
         run: |
           mkdir -p reports
           TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
