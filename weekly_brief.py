@@ -565,6 +565,117 @@ def summarize(p):
     return [dict(k=k, v=v) for k, v in lines]
 
 
+def render_text(p):
+    """메일 본문용 글 보고서. 메일 앱에서 첨부를 열지 않아도 읽을 수 있게 한다."""
+    sg = lambda v: f"{v:+.2f}%"
+    L = []
+    add = L.append
+    add(f"{p['title']} 주간 시황 브리핑")
+    add(f"미장 {p['week_us']} · 국장 {p['week_kr']}" + (" · 샘플 데이터" if p["demo"] else ""))
+    add("")
+    add("■ 이번 주 핵심")
+    for x in p["summary"]:
+        add(f"  · {x['k']}: {x['v']}")
+
+    add("")
+    add("■ 지수 (주간 / 1개월)")
+    for i in p["indices"]:
+        add(f"  {i['name']:<10} {i['last']:>12,.2f}   {sg(i['wk']):>8}   {sg(i['m1']):>8}")
+    if p["macro"]:
+        add("")
+        add("■ 환율 · 금리 · 원자재 (주간)")
+        for m in p["macro"]:
+            if m["kind"] == "yield":
+                add(f"  {m['name']}: {m['last']:.2f}% ({m['chg'] * 100:+.0f}bp)")
+            elif m["kind"] == "fx":
+                add(f"  {m['name']}: {m['last']:,.1f}원 ({m['chg']:+.1f}원)")
+            else:
+                add(f"  {m['name']}: {m['last']:,.2f} ({sg(m['wk'])})")
+
+    add("")
+    add("■ 미장 섹터 — 돈은 어디로 갔나 (주간 등락 · 거래대금 평소 대비)")
+    for r in p["sectors"]:
+        flow = "돈 유입" if r["dvr"] >= 1.1 and r["wk"] > 0 else "매도세" if r["dvr"] >= 1.1 else ""
+        add(f"  {r['name']:<8} {sg(r['wk']):>8}   {r['dvr']:.1f}배  {flow}")
+    if p["styles"]:
+        add("")
+        add("■ 스타일 대결")
+        for x in p["styles"]:
+            add(f"  {x['name']}: {x['a']} {sg(x['aw'])} vs {x['b']} {sg(x['bw'])} → {x['win']} 우위")
+
+    add("")
+    add("■ 강세 테마 TOP 10 (구성종목 평균 · 거래대금 · 주도주)")
+    for t in p["themes"][:10]:
+        add(f"  {t['name']:<14} {sg(t['wk']):>8}  {t['dvr']:.1f}배  {', '.join(t['lead'])}")
+    add("■ 약세 테마 TOP 5")
+    for t in p["themes"][::-1][:5]:
+        add(f"  {t['name']:<14} {sg(t['wk']):>8}  {t['dvr']:.1f}배")
+
+    mv = p["movers"]
+    for title, rows, extra in (("미장 주간 상승 TOP 10", mv["up"], None),
+                               ("미장 주간 하락 TOP 10", mv["down"], None),
+                               ("미장 거래대금 급증 TOP 10", mv["flow"], "dvr")):
+        add("")
+        add(f"■ {title}")
+        for r in rows:
+            tail = f"  거래대금 {r['dvr']:.1f}배" if extra else ""
+            add(f"  {r['sym']:<6} {r['name'][:18]:<18} {sg(r['wk']):>8}  ({r['t']}){tail}")
+    if mv["nh"]:
+        add("")
+        add(f"■ 이번 주 52주 신고가 ({p['nh_total']}개 중 거래대금 상위)")
+        add("  " + ", ".join(f"{r['sym']}({r['wk']:+.1f}%)" for r in mv["nh"]))
+
+    k = p["kr"]
+    if k.get("investors"):
+        add("")
+        add("■ 국장 투자자별 순매수 (주간 합계)")
+        for mkt, v in k["investors"].items():
+            add(f"  {'코스피' if mkt == 'KOSPI' else '코스닥'}: " + " · ".join(f"{a} {fmt_krw(b)}" for a, b in v.items()))
+    if p["kr_etfs"]:
+        add("")
+        add("■ 국장 테마 ETF (주간 등락 · 거래대금 평소 대비)")
+        for e in p["kr_etfs"]:
+            add(f"  {e['name']:<10} {sg(e['wk']):>8}  {e['dvr']:.1f}배")
+    for key, title in (("foreign_buy", "외국인 순매수 TOP"), ("inst_buy", "기관 순매수 TOP")):
+        if k.get(key):
+            add("")
+            add(f"■ {title}")
+            add("  " + ", ".join(f"{r['name']}({fmt_krw(r['amt'])})" for r in k[key]))
+    for key, title in (("up", "국장 주간 상승 TOP 10"), ("down", "국장 주간 하락 TOP 10"),
+                       ("tv_top", "국장 주간 거래대금 TOP 10")):
+        if k.get(key):
+            add("")
+            add(f"■ {title}")
+            for r in k[key]:
+                add(f"  {r['name']:<12} {r['close']:>10,.0f}원  {sg(r['wk']):>8}  거래대금 {fmt_krw(r['tv']).lstrip('+')}")
+
+    add("")
+    add("■ 다음 주 실적 발표")
+    add("  " + (", ".join(f"{r['date']} {r['sym']}" for r in p["earnings"]) or "수집된 일정 없음"))
+    add("")
+    add(f"생성 {p['generated']} · 데이터 yfinance / 네이버 증권 / KRX")
+    return "\n".join(L)
+
+
+def save_pdf(html_path, pdf_path):
+    """방송·폰 확인용 PDF. playwright가 없으면 건너뛴다."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("  PDF 생략: playwright 미설치", file=sys.stderr)
+        return
+    with sync_playwright() as pw:
+        exe = os.environ.get("CHROMIUM_PATH")  # 번들 브라우저 대신 쓸 크롬 경로 (선택)
+        b = pw.chromium.launch(executable_path=exe) if exe else pw.chromium.launch()
+        page = b.new_page(viewport={"width": 1280, "height": 900})
+        page.goto("file://" + os.path.abspath(html_path))
+        page.wait_for_timeout(500)
+        page.pdf(path=pdf_path, format="A4", landscape=True, print_background=True,
+                 margin={"top": "10mm", "bottom": "10mm", "left": "8mm", "right": "8mm"})
+        b.close()
+    print(f"  PDF 생성: {pdf_path}", file=sys.stderr)
+
+
 def fmt_krw(v):
     s = "+" if v >= 0 else "-"
     a = abs(v)
@@ -699,7 +810,14 @@ tr:hover td{background:var(--panel-2)}
 .empty{color:var(--ink-3);font-size:14px;padding:12px 0}
 footer{color:var(--ink-3);font-size:12px;text-align:center;padding:20px}
 
-@media print{.nav{display:none} section{min-height:0;page-break-after:always}}
+@media print{
+  .nav{display:none} body{font-size:13px}
+  section{min-height:0;padding:12px 0;border:0;break-before:page}
+  section:first-of-type{break-before:auto}
+  .card,.sum div,.bar,tr{break-inside:avoid}
+  .card{box-shadow:none}
+  .note{min-height:60px}
+}
 </style>
 
 <nav class="nav" id="nav"></nav>
@@ -1019,7 +1137,17 @@ def main():
     ap.add_argument("--output", "-o", default="weekly_brief.html", help="출력 HTML 경로")
     ap.add_argument("--no-kr", action="store_true", help="국장 수급 생략")
     ap.add_argument("--no-earnings", action="store_true", help="다음 주 실적 일정 생략")
+    ap.add_argument("--text", help="글 보고서(.txt) 경로 — 메일 본문용")
+    ap.add_argument("--pdf", help="PDF 경로 (playwright 필요)")
+    ap.add_argument("--json", help="집계 데이터(.json) 저장 경로")
+    ap.add_argument("--from-json", help="저장해 둔 집계 데이터로 다시 그리기 (수집 생략)")
     args = ap.parse_args()
+
+    if args.from_json:
+        with open(args.from_json, encoding="utf-8") as f:
+            payload = json.load(f)
+        write_outputs(payload, args)
+        return
 
     theme_syms = sorted({s for syms in US_THEMES.values() for s in syms})
     extra = [s for s, *_ in INDICES] + [s for s, *_ in MACRO] + [s for s, _ in SECTORS] \
@@ -1067,7 +1195,6 @@ def main():
             earnings = fetch_earnings(top, nxt_mon, nxt_mon + timedelta(days=4))
 
     payload = build_payload(frames, kr, earnings, args.demo)
-    html = render_html(payload)
 
     # 로그에서 바로 확인할 수 있게 요약을 남긴다
     print("  ── 요약 ──", file=sys.stderr)
@@ -1079,9 +1206,25 @@ def main():
           f"국장ETF {len(payload['kr_etfs'])} · 국장수급 {list(k.get('investors', {}))} · "
           f"외국인TOP {len(k.get('foreign_buy', []))} · 국장특징주 {len(k.get('up', []))} · "
           f"실적 {len(payload['earnings'])}", file=sys.stderr)
+    write_outputs(payload, args)
+
+
+def write_outputs(payload, args):
+    html = render_html(payload)
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  생성 완료: {args.output} ({len(html.encode('utf-8')) / 1e3:.0f} KB)", file=sys.stderr)
+    if args.text:
+        with open(args.text, "w", encoding="utf-8") as f:
+            f.write(render_text(payload))
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    if args.pdf:
+        try:
+            save_pdf(args.output, args.pdf)
+        except Exception as e:
+            print(f"  PDF 실패: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,11 @@ on:
         required: false
         default: true
         type: boolean
+      print_data:
+        description: '집계 데이터를 로그에 출력 (점검용)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   brief:
@@ -25,7 +30,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance pandas matplotlib numpy pykrx requests lxml html5lib beautifulsoup4
+        run: |
+          pip install yfinance pandas matplotlib numpy pykrx requests lxml html5lib beautifulsoup4 playwright
+          python -m playwright install --with-deps chromium
+          # PDF에 한글이 깨지지 않게
+          sudo apt-get install -y -q fonts-noto-cjk
 
       - name: Build weekly brief
         env:
@@ -37,14 +46,28 @@ jobs:
           mkdir -p reports
           TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
           echo "TODAY=$TODAY" >> $GITHUB_ENV
-          python3 weekly_brief.py -o reports/weekly_brief_$TODAY.html
+          python3 weekly_brief.py -o reports/weekly_brief_$TODAY.html \
+            --pdf reports/weekly_brief_$TODAY.pdf \
+            --text reports/weekly_brief_$TODAY.txt \
+            --json reports/weekly_brief_$TODAY.json
+          cat reports/weekly_brief_$TODAY.txt
+
+      - name: Print data
+        if: inputs.print_data
+        run: |
+          python3 - <<'EOF'
+          import os
+          s = open(f"reports/weekly_brief_{os.environ['TODAY']}.json", encoding="utf-8").read()
+          for i in range(0, len(s), 3000):
+              print("PAYLOAD|" + s[i:i + 3000])
+          EOF
 
       # 메일이 안 와도 Actions 화면에서 받을 수 있게 남겨둔다
       - name: Upload brief
         uses: actions/upload-artifact@v4
         with:
           name: weekly-brief-${{ env.TODAY }}
-          path: reports/weekly_brief_${{ env.TODAY }}.html
+          path: reports/weekly_brief_${{ env.TODAY }}.*
           retention-days: 30
 
       - name: Send email
@@ -58,18 +81,7 @@ jobs:
           subject: "[주간 라이브] 미장·국장 주간 시황 - ${{ env.TODAY }}"
           to: pooq1553@gmail.com
           from: 투자보고서봇
-          body: |
-            이번 주 라이브 방송 자료입니다.
-            첨부된 weekly_brief_${{ env.TODAY }}.html 을 브라우저로 열어 화면 공유하면 됩니다.
-            (← / → 키로 섹션 이동, 인터넷 없이도 열립니다)
-
-            구성
-            1. 오프닝: 지수 + 이번 주 핵심 요약
-            2. 환율·금리·원자재
-            3. 미장 섹터 — 돈은 어디로 갔나 (섹터 ETF 등락 + 거래대금 증감, 스타일 대결)
-            4. 테마 머니플로우 맵 (87개 테마, 등락 x 거래대금)
-            5. 미장 특징주 (상승/하락/거래대금 급증/52주 신고가)
-            6. 국장 수급 (투자자별 순매수, 외국인·기관 TOP, 업종)
-            7. 국장 특징주 (상승/하락/거래대금 TOP)
-            8. 다음 주 체크포인트 (실적 일정 + 메모)
-          attachments: reports/weekly_brief_${{ env.TODAY }}.html
+          # 본문에 글 보고서를 그대로 넣는다 (첨부를 안 열어도 읽힘)
+          body: file://reports/weekly_brief_${{ env.TODAY }}.txt
+          # PDF: 폰·PC 어디서나 바로 열림 / HTML: 브라우저로 열면 차트에 마우스 올려 상세 확인
+          attachments: reports/weekly_brief_${{ env.TODAY }}.pdf,reports/weekly_brief_${{ env.TODAY }}.html
