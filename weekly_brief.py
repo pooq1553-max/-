@@ -23,14 +23,16 @@
 import argparse
 import json
 import math
+import os
 import random
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 
 import pandas as pd
 
-from stock_report import US_THEMES, THEME_GROUPS, get_name
+from stock_report import US_THEMES, THEME_GROUPS, KOSPI, KOSDAQ, get_name
 
 KST = timezone(timedelta(hours=9))
 
@@ -67,6 +69,18 @@ STYLES = [
     ("SPY", "IWM", "대형주 vs 소형주", "대형", "소형"),
     ("SPY", "RSP", "시총가중 vs 동일가중", "빅테크 쏠림", "골고루"),
     ("SPHB", "SPLV", "고베타 vs 저변동", "공격", "방어"),
+]
+
+# 국장 업종 대신 쓰는 테마 ETF — KRX 로그인 없이 yfinance로 받는다
+KR_ETFS = [
+    ("091160.KS", "반도체"), ("139260.KS", "IT(대형)"), ("305720.KS", "2차전지"),
+    ("091180.KS", "자동차"), ("466920.KS", "조선"), ("139230.KS", "중공업"),
+    ("449450.KS", "방산"), ("434730.KS", "원자력"), ("445290.KS", "로봇"),
+    ("244580.KS", "바이오"), ("227540.KS", "헬스케어"), ("091170.KS", "은행"),
+    ("102970.KS", "증권"), ("140700.KS", "보험"), ("117700.KS", "건설"),
+    ("117680.KS", "철강"), ("117460.KS", "에너지화학"), ("140710.KS", "운송"),
+    ("228790.KS", "화장품"), ("266410.KS", "필수소비재"), ("228810.KS", "미디어/엔터"),
+    ("300950.KS", "게임"), ("157490.KS", "소프트웨어"),
 ]
 
 US_MIN_DV = 20e6     # 특징주 최소 일평균 거래대금 ($)
@@ -241,6 +255,66 @@ def fetch_kr(kr_days, prev_day):
     return kr
 
 
+def _num(x):
+    try:
+        v = float(str(x).replace(",", "").replace("+", ""))
+        return 0.0 if v != v else v
+    except ValueError:
+        return 0.0
+
+
+def fetch_naver_investors(kr_days):
+    """KRX 로그인 없이 네이버 증권 API로 투자자별 일별 순매수를 받아 주간 합계를 낸다. 단위: 원."""
+    import requests
+
+    out = {}
+    for mkt in ("KOSPI", "KOSDAQ"):
+        tot, got = {"외국인": 0.0, "기관": 0.0, "개인": 0.0}, 0
+        for d in kr_days:
+            day = pd.Timestamp(d).strftime("%Y%m%d")
+            try:
+                res = requests.get(f"https://m.stock.naver.com/api/index/{mkt}/trend",
+                                   params={"bizdate": day}, timeout=10,
+                                   headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.stock.naver.com/"})
+                j = res.json()
+                if j.get("bizdate") != day:     # 휴장일 등은 다른 날짜가 돌아온다
+                    continue
+                # 값은 억원 단위 문자열 ("+3,189")
+                tot["외국인"] += _num(j.get("foreignValue"))
+                tot["기관"] += _num(j.get("institutionalValue"))
+                tot["개인"] += _num(j.get("personalValue"))
+                got += 1
+            except Exception as e:
+                print(f"  [국장] 네이버 투자자별({mkt} {day}) 실패: {e}", file=sys.stderr)
+            time.sleep(0.2)
+        if got:
+            out[mkt] = {k: v * 1e8 for k, v in tot.items()}
+        print(f"  [국장] 네이버 투자자별({mkt}) {got}/{len(kr_days)}일 "
+              + " ".join(f"{k} {v:+,.0f}억" for k, v in tot.items()), file=sys.stderr)
+    return out
+
+
+def kr_movers_from_frames(frames, kr_week, kr_prev):
+    """KRX 로그인 없이 yfinance 시세로 코스피·코스닥 대형주 주간 등락 / 거래대금."""
+    rows = []
+    for sym in KOSPI + KOSDAQ:
+        df = frames.get(sym)
+        s = stats(df, kr_week, kr_prev) if df is not None else None
+        if not s:
+            continue
+        wk = df.loc[df.index.isin(kr_week)]
+        rows.append(dict(sym=sym, name=get_name(sym), close=s["close"], wk=s["wk"],
+                         tv=float((wk["Close"] * wk["Volume"]).sum())))
+    if not rows:
+        return {}
+    return dict(
+        up=sorted(rows, key=lambda r: r["wk"], reverse=True)[:TOP_N],
+        down=sorted(rows, key=lambda r: r["wk"])[:TOP_N],
+        tv_top=sorted(rows, key=lambda r: r["tv"], reverse=True)[:TOP_N],
+        movers_src=f"코스피·코스닥 대형주 {len(rows)}종목",
+    )
+
+
 # ───────────────────────── 샘플 데이터 ─────────────────────────
 
 def demo_frames(symbols):
@@ -375,6 +449,13 @@ def build_payload(frames, kr, earnings, demo):
             sectors.append(dict(sym=sym, name=name, wk=s["wk"], dvr=s["dvr"], m1=s["m1"]))
     sectors.sort(key=lambda r: r["wk"], reverse=True)
 
+    kr_etfs = []
+    for sym, name in KR_ETFS:
+        s = st(sym, kr_week, kr_prev)
+        if s:
+            kr_etfs.append(dict(sym=sym.replace(".KS", ""), name=name, wk=s["wk"], dvr=s["dvr"]))
+    kr_etfs.sort(key=lambda r: r["wk"], reverse=True)
+
     styles = []
     for a, b, name, la, lb in STYLES:
         sa, sb = st(a), st(b)
@@ -433,7 +514,7 @@ def build_payload(frames, kr, earnings, demo):
         indices=indices, macro=macro, sectors=sectors, styles=styles,
         themes=themes, movers=movers, nh_total=nh_total, universe=len(stocks),
         breadth=round(sum(1 for s in stocks.values() if s["wk"] > 0) / max(len(stocks), 1) * 100),
-        kr=kr or {}, earnings=earnings or [],
+        kr=kr or {}, kr_etfs=kr_etfs, earnings=earnings or [],
     )
     p["summary"] = summarize(p)
     return p
@@ -468,6 +549,10 @@ def summarize(p):
     if cold:
         lines.append(("약세 테마", ", ".join(f"{t['name']}({sign(t['wk'])})" for t in cold)))
 
+    ke = [e for e in p["kr_etfs"] if e["dvr"] >= 1.0 and e["wk"] > 0][:3] or p["kr_etfs"][:3]
+    if ke:
+        lines.append(("국장 테마", "돈 몰린 곳: " + ", ".join(
+            f"{e['name']}({sign(e['wk'])}, 거래대금 {e['dvr']:.1f}배)" for e in ke)))
     inv = p["kr"].get("investors", {}).get("KOSPI")
     if inv:
         lines.append(("국장 수급", "코스피 " + " · ".join(f"{k} {fmt_krw(v)}" for k, v in inv.items())))
@@ -824,21 +909,31 @@ const idx = D.indices, byG = g => idx.filter(i => i.g === g);
 /* 6. 국장 수급 */
 {
   const K = D.kr;
-  const s = section("krflow", "KR · FLOW", "국장 수급 — 누가 샀나", `기간 ${esc(K.period || D.week_kr)}. 단위 원.`);
-  if (!K.investors && !K.foreign_buy) {
-    s.insertAdjacentHTML("beforeend", `<div class="card empty">국장 수급 데이터를 받지 못했습니다 (pykrx).</div>`);
-  } else {
+  const s = section("krflow", "KR · FLOW", "국장 수급 — 누가 샀나, 어디로 갔나", `기간 ${esc(K.period || D.week_kr)}.`);
+  const inv = Object.entries(K.investors || {});
+  if (inv.length) {
     const g = grid(s, "g2");
-    Object.entries(K.investors || {}).forEach(([mkt, v]) =>
+    inv.forEach(([mkt, v]) =>
       card(g, `${mkt === "KOSPI" ? "코스피" : "코스닥"} 투자자별 순매수`, "주간 합계",
         divBars(Object.entries(v).map(([k, a]) => ({label: k, wk: a})), {fmt: krw})));
-    const list = (rows) => `<div class="tbl"><table><tbody>` + (rows || []).map((r, i) =>
+  } else {
+    s.insertAdjacentHTML("beforeend", `<div class="card empty">투자자별 순매수 데이터를 받지 못했습니다.</div>`);
+  }
+  if (D.kr_etfs.length) {
+    const c = card(s, "국장 테마 ETF 주간 등락", "괄호는 거래대금이 평소(직전 20일 평균)의 몇 배였는지 — 미장 섹터와 같은 기준",
+      divBars(D.kr_etfs.map(r => ({label: r.name, small: `${r.dvr.toFixed(1)}배`, wk: r.wk,
+        tip: `<b>${esc(r.name)} ETF (${r.sym})</b>주간 ${pc(r.wk)}<br>거래대금 평소 대비 ${r.dvr.toFixed(2)}배`}))));
+    c.style.marginTop = "14px";
+  }
+  {
+    const list = (rows) => `<div class="tbl"><table><tbody>` + rows.map((r, i) =>
       `<tr><td><span class="t">${i+1}</span> <span class="n">${esc(r.name)}</span></td><td class="${cls(r.amt)}"><b>${krw(r.amt)}</b></td></tr>`).join("") + `</tbody></table></div>`;
-    const g2 = grid(s, "g4"); g2.style.marginTop = "14px";
-    card(g2, "외국인 순매수 TOP", "", list(K.foreign_buy));
-    card(g2, "외국인 순매도 TOP", "", list(K.foreign_sell));
-    card(g2, "기관 순매수 TOP", "", list(K.inst_buy));
-    card(g2, "기관 순매도 TOP", "", list(K.inst_sell));
+    const lists = [["외국인 순매수 TOP", K.foreign_buy], ["외국인 순매도 TOP", K.foreign_sell],
+                   ["기관 순매수 TOP", K.inst_buy], ["기관 순매도 TOP", K.inst_sell]].filter(x => x[1] && x[1].length);
+    if (lists.length) {
+      const g2 = grid(s, "g4"); g2.style.marginTop = "14px";
+      lists.forEach(([t, rows]) => card(g2, t, "", list(rows)));
+    }
     if (K.sectors) {
       const top = K.sectors.slice(0, 8), bot = K.sectors.slice(-5).filter(r => !top.includes(r));
       const c = card(s, "코스피 업종 주간 등락", "강한 업종 8 · 약한 업종 5",
@@ -851,16 +946,16 @@ const idx = D.indices, byG = g => idx.filter(i => i.g === g);
 /* 7. 국장 특징주 */
 {
   const K = D.kr;
-  const s = section("kr", "KR · MOVERS", "국장 특징주", "코스피+코스닥, 시가총액 3,000억 이상.");
+  const s = section("kr", "KR · MOVERS", "국장 특징주", esc(K.movers_src || "코스피+코스닥, 시가총액 3,000억 이상") + ".");
   if (!K.up) {
-    s.insertAdjacentHTML("beforeend", `<div class="card empty">국장 종목 데이터를 받지 못했습니다 (pykrx).</div>`);
+    s.insertAdjacentHTML("beforeend", `<div class="card empty">국장 종목 데이터를 받지 못했습니다.</div>`);
   } else {
     const g = grid(s, "g3");
     const tbl = (rows, last) => `<div class="tbl"><table><thead><tr><th>종목</th><th>종가</th><th>주간</th><th>${last}</th></tr></thead><tbody>` +
       rows.map(r => `<tr><td><span class="n">${esc(r.name)}</span></td><td>${Math.round(r.close).toLocaleString()}</td>
-        <td class="${cls(r.wk)}"><b>${pc(r.wk,1)}</b></td><td>${last === "시총" ? krwAbs(r.cap) : krwAbs(r.tv)}</td></tr>`).join("") + `</tbody></table></div>`;
-    card(g, "주간 상승 TOP 10", "", tbl(K.up, "시총"));
-    card(g, "주간 하락 TOP 10", "", tbl(K.down, "시총"));
+        <td class="${cls(r.wk)}"><b>${pc(r.wk,1)}</b></td><td>${krwAbs(r.tv)}</td></tr>`).join("") + `</tbody></table></div>`;
+    card(g, "주간 상승 TOP 10", "", tbl(K.up, "거래대금"));
+    card(g, "주간 하락 TOP 10", "", tbl(K.down, "거래대금"));
     card(g, "주간 거래대금 TOP 10", "돈이 가장 많이 오간 종목", tbl(K.tv_top, "거래대금"));
   }
 }
@@ -922,13 +1017,13 @@ def main():
     ap = argparse.ArgumentParser(description="주간 시황 방송 자료 HTML 생성")
     ap.add_argument("--demo", action="store_true", help="샘플 데이터로 생성 (레이아웃 확인용)")
     ap.add_argument("--output", "-o", default="weekly_brief.html", help="출력 HTML 경로")
-    ap.add_argument("--no-kr", action="store_true", help="국장 수급(pykrx) 생략")
+    ap.add_argument("--no-kr", action="store_true", help="국장 수급 생략")
     ap.add_argument("--no-earnings", action="store_true", help="다음 주 실적 일정 생략")
     args = ap.parse_args()
 
     theme_syms = sorted({s for syms in US_THEMES.values() for s in syms})
     extra = [s for s, *_ in INDICES] + [s for s, *_ in MACRO] + [s for s, _ in SECTORS] \
-        + [x for a, b, *_ in STYLES for x in (a, b)]
+        + [x for a, b, *_ in STYLES for x in (a, b)] + [s for s, _ in KR_ETFS] + KOSPI + KOSDAQ
     symbols = sorted(set(theme_syms + extra))
 
     if args.demo:
@@ -943,10 +1038,19 @@ def main():
         kr = {}
         if not args.no_kr and "^KS11" in frames:
             kr_week, kr_prev = week_split(frames["^KS11"].index)
-            try:
-                kr = fetch_kr(kr_week, kr_prev)
-            except Exception as e:
-                print(f"  [국장] 수급 수집 실패, 생략: {e}", file=sys.stderr)
+            # pykrx는 KRX 로그인(KRX_ID/KRX_PW)이 있어야 동작한다
+            if os.environ.get("KRX_ID") and os.environ.get("KRX_PW"):
+                try:
+                    kr = fetch_kr(kr_week, kr_prev)
+                except Exception as e:
+                    print(f"  [국장] pykrx 수집 실패: {e}", file=sys.stderr)
+            else:
+                print("  [국장] KRX 계정 없음 — 네이버/yfinance 대체 경로 사용", file=sys.stderr)
+            kr.setdefault("period", f"{kr_week[0]:%m/%d}~{kr_week[-1]:%m/%d}")
+            if not kr.get("investors"):
+                kr["investors"] = fetch_naver_investors(kr_week)
+            if not kr.get("up"):
+                kr.update(kr_movers_from_frames(frames, kr_week, kr_prev))
         earnings = []
         if not args.no_earnings:
             last = frames["^GSPC"].index[-1].date()
@@ -964,6 +1068,17 @@ def main():
 
     payload = build_payload(frames, kr, earnings, args.demo)
     html = render_html(payload)
+
+    # 로그에서 바로 확인할 수 있게 요약을 남긴다
+    print("  ── 요약 ──", file=sys.stderr)
+    for line in payload["summary"]:
+        print(f"  [{line['k']}] {line['v']}", file=sys.stderr)
+    k = payload["kr"]
+    print(f"  섹션: 지수 {len(payload['indices'])} · 매크로 {len(payload['macro'])} · "
+          f"섹터 {len(payload['sectors'])} · 테마 {len(payload['themes'])} · "
+          f"국장ETF {len(payload['kr_etfs'])} · 국장수급 {list(k.get('investors', {}))} · "
+          f"외국인TOP {len(k.get('foreign_buy', []))} · 국장특징주 {len(k.get('up', []))} · "
+          f"실적 {len(payload['earnings'])}", file=sys.stderr)
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  생성 완료: {args.output} ({len(html.encode('utf-8')) / 1e3:.0f} KB)", file=sys.stderr)
