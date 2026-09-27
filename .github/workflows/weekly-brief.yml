@@ -28,6 +28,14 @@ jobs:
           echo "TODAY=$TODAY" >> $GITHUB_ENV
           python3 weekly_brief.py -o reports/weekly_brief_$TODAY.html
 
+      # 메일이 안 와도 Actions 화면에서 받을 수 있게 남겨둔다
+      - name: Upload brief
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-brief-${{ env.TODAY }}
+          path: reports/weekly_brief_${{ env.TODAY }}.html
+          retention-days: 30
+
       - name: Send email
         uses: dawidd6/action-send-mail@v3
         with:
