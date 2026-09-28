@@ -1,0 +1,6 @@
+easyocr>=1.7
+manga-ocr>=0.1.14
+opencv-python-headless>=4.8
+numpy
+Pillow>=10.0
+requests
