@@ -289,6 +289,25 @@ class App:
         self.root.destroy()
 
 
+def diagnose_torchvision():
+    """exe 에서 torchvision 확장(_C) 로딩이 실패할 때 원인을 기록에 남긴다."""
+    base = Path(getattr(sys, "_MEIPASS", "")) / "torchvision"
+    print(f"[진단] {base} 존재={base.exists()}", file=sys.stderr)
+    if not base.exists():
+        return
+    for f in sorted(base.glob("*.pyd")) + sorted(base.glob("*.dll")):
+        print(f"[진단] {f.name}", file=sys.stderr)
+    pyd = next(iter(base.glob("_C*.pyd")), None)
+    if pyd:
+        try:
+            import ctypes
+            import torch  # noqa: F401  (torch DLL 경로 등록)
+            ctypes.CDLL(str(pyd))
+            print("[진단] _C.pyd 직접 로드 성공", file=sys.stderr)
+        except Exception as e:
+            print(f"[진단] _C.pyd 로드 실패: {e!r}", file=sys.stderr)
+
+
 def ensure_desktop_shortcut():
     """exe 를 처음 켰을 때 바탕화면에 바로가기를 한 번 만들어 둔다 (지워도 다시 만들지 않음)."""
     if not (getattr(sys, "frozen", False) and sys.platform.startswith("win")):
@@ -323,6 +342,8 @@ def main():
         except BaseException:
             # 창 모드 exe 에서 예외가 새어 나가면 오류 대화상자가 떠서 멈춘다 → 기록만 남기고 종료
             traceback.print_exc()
+            if getattr(sys, "frozen", False) and "torchvision" in traceback.format_exc():
+                diagnose_torchvision()
             sys.stderr.flush()
             os._exit(1)
         return

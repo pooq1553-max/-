@@ -56,6 +56,7 @@ jobs:
           --add-data "fonts;fonts"
           --collect-data manga_ocr --collect-data unidic_lite --collect-all fugashi
           --collect-data easyocr --collect-all tkinterdnd2
+          --collect-all torchvision
           --collect-submodules transformers.models.vision_encoder_decoder
           --collect-submodules transformers.models.vit
           --collect-submodules transformers.models.bert
@@ -67,7 +68,9 @@ jobs:
 
       - name: Smoke test the built exe
         shell: bash
-        run: python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- dist/MangaTranslator/MangaTranslator.exe
+        run: |
+          ls dist/MangaTranslator/_internal/torchvision | grep -iE "\.(pyd|dll)$" || echo "no torchvision binaries"
+          python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- dist/MangaTranslator/MangaTranslator.exe
 
       - name: Zip the app
         run: |
