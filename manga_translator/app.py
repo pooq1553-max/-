@@ -313,11 +313,27 @@ def ensure_desktop_shortcut():
 
 def main():
     if len(sys.argv) > 1:          # 인자가 있으면 명령줄 모드
-        tm.main(sys.argv[1:])
+        try:
+            tm.main(sys.argv[1:])
+        except SystemExit as e:
+            if e.code not in (None, 0):
+                print(e.code, file=sys.stderr)
+                sys.stderr.flush()
+                os._exit(1)
+        except BaseException:
+            # 창 모드 exe 에서 예외가 새어 나가면 오류 대화상자가 떠서 멈춘다 → 기록만 남기고 종료
+            traceback.print_exc()
+            sys.stderr.flush()
+            os._exit(1)
         return
-    ensure_desktop_shortcut()
-    root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
-    App(root)
+    try:
+        ensure_desktop_shortcut()
+        root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
+        App(root)
+    except Exception:
+        traceback.print_exc()
+        messagebox.showerror("만화 번역기", f"프로그램을 시작하지 못했습니다:\n{traceback.format_exc()[-800:]}")
+        return
     root.mainloop()
 
 

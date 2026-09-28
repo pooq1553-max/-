@@ -54,7 +54,11 @@ def main():
     src = work / "pages"
     make_pages(font_path, src)
 
-    proc = subprocess.run(cmd + [str(src)], timeout=3600)
+    try:
+        rc = subprocess.run(cmd + [str(src)], timeout=900).returncode
+    except subprocess.TimeoutExpired:
+        print("15분 안에 끝나지 않아 중단했습니다.")
+        rc = "timeout"
     out = work / "pages_한국어"
     log = Path.home() / ".manga_translator" / "last_run.log"
     if log.exists():
@@ -67,8 +71,8 @@ def main():
     print(text or "(없음)")
     pngs = sorted(out.glob("*.png"))
     hangul = len(re.findall(r"[가-힣]", text))
-    print(f"종료코드={proc.returncode}, 결과 이미지 {len(pngs)}장, 한글 {hangul}자")
-    if proc.returncode != 0 or len(pngs) != 2 or hangul < 10:
+    print(f"종료코드={rc}, 결과 이미지 {len(pngs)}장, 한글 {hangul}자")
+    if rc != 0 or len(pngs) != 2 or hangul < 10:
         sys.exit("점검 실패")
     print("점검 통과")
 
