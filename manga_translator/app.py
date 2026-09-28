@@ -289,10 +289,33 @@ class App:
         self.root.destroy()
 
 
+def ensure_desktop_shortcut():
+    """exe 를 처음 켰을 때 바탕화면에 바로가기를 한 번 만들어 둔다 (지워도 다시 만들지 않음)."""
+    if not (getattr(sys, "frozen", False) and sys.platform.startswith("win")):
+        return
+    marker = Path.home() / ".manga_translator" / "shortcut_done"
+    if marker.exists():
+        return
+    exe = sys.executable.replace("'", "''")
+    ps = (
+        "$d=[Environment]::GetFolderPath('Desktop');"
+        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d '만화 번역기.lnk'));"
+        f"$s.TargetPath='{exe}';$s.WorkingDirectory=(Split-Path '{exe}');$s.Save()"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], timeout=30,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("ok")
+    except Exception:
+        pass
+
+
 def main():
     if len(sys.argv) > 1:          # 인자가 있으면 명령줄 모드
         tm.main(sys.argv[1:])
         return
+    ensure_desktop_shortcut()
     root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
     App(root)
     root.mainloop()

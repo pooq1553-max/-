@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: manga-translator-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
@@ -86,7 +90,7 @@ jobs:
           body: |
             **다운로드:** 아래 `MangaTranslator-windows.zip`
 
-            1. zip 을 풀고 `MangaTranslator` 폴더 안의 **MangaTranslator.exe** 를 더블클릭
+            1. zip 을 풀고 `MangaTranslator` 폴더 안의 **MangaTranslator.exe** 를 더블클릭 (처음 켜면 바탕화면에 '만화 번역기' 바로가기가 생깁니다)
             2. 만화 폴더나 zip 을 창에 끌어다 놓고 **번역 시작**
             3. 결과는 원본 옆 `이름_한국어` 폴더에 저장
 
