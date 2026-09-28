@@ -31,6 +31,7 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
+DATA_DIR = Path.home() / ".manga_translator"   # 폰트 등 내려받은 파일 저장 위치
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Bold.ttf"
 SYSTEM_FONTS = [
@@ -64,28 +65,29 @@ def load_pages(src: Path):
     elif src.suffix.lower() in IMG_EXTS:
         yield src.name, Image.open(src).convert("RGB")
     else:
-        sys.exit(f"지원하지 않는 입력입니다: {src} (폴더, zip/cbz, 이미지 파일만 가능)")
+        raise ValueError(f"지원하지 않는 입력입니다: {src} (폴더, zip/cbz, 이미지 파일만 가능)")
 
 
-def get_font_path(user_font=None):
+def get_font_path(user_font=None, log=print):
     if user_font:
         return user_font
-    bundled = HERE / "fonts" / "NanumGothic-Bold.ttf"
-    if bundled.exists():
-        return str(bundled)
+    for cand in (HERE / "fonts" / "NanumGothic-Bold.ttf", DATA_DIR / "NanumGothic-Bold.ttf"):
+        if cand.exists():
+            return str(cand)
+    bundled = DATA_DIR / "NanumGothic-Bold.ttf"
     try:
-        print("한글 폰트(나눔고딕) 내려받는 중...")
+        log("한글 폰트(나눔고딕) 내려받는 중...")
         r = requests.get(FONT_URL, timeout=60)
         r.raise_for_status()
-        bundled.parent.mkdir(exist_ok=True)
+        bundled.parent.mkdir(parents=True, exist_ok=True)
         bundled.write_bytes(r.content)
         return str(bundled)
     except Exception as e:
-        print(f"  폰트 다운로드 실패({e}), 시스템 폰트를 찾습니다.")
+        log(f"  폰트 다운로드 실패({e}), 시스템 폰트를 찾습니다.")
     for f in SYSTEM_FONTS:
         if Path(f).exists():
             return f
-    sys.exit("한글 폰트를 찾지 못했습니다. --font 로 .ttf 파일 경로를 지정해 주세요.")
+    raise RuntimeError("한글 폰트를 찾지 못했습니다. --font 로 .ttf 파일 경로를 지정해 주세요.")
 
 
 # ───────────────────────── 글자 검출·인식 ─────────────────────────
@@ -111,10 +113,10 @@ class Block:
 
 
 class Ocr:
-    def __init__(self, lang, gpu):
+    def __init__(self, lang, gpu, log=print):
         import easyocr
         langs = {"ja": ["ja", "en"], "en": ["en"], "zh": ["ch_sim", "en"]}[lang]
-        print("OCR 모델 불러오는 중... (첫 실행 때는 모델 다운로드로 몇 분 걸립니다)")
+        log("OCR 모델 불러오는 중... (첫 실행 때는 모델 다운로드로 몇 분 걸립니다)")
         self.lang = lang
         self.reader = easyocr.Reader(langs, gpu=gpu, verbose=False)
         self.mocr = None
@@ -215,7 +217,8 @@ def is_noise(text):
 # ───────────────────────── 번역 ─────────────────────────
 
 class Translator:
-    def __init__(self, engine, src, ollama_model, ollama_url):
+    def __init__(self, engine, src, ollama_model, ollama_url, log=print):
+        self.log = log
         self.engine = engine
         self.src = {"zh": "zh-CN"}.get(src, src)
         self.src_name = LANG_NAMES[src]
@@ -234,7 +237,7 @@ class Translator:
                 self.context = (self.context + list(zip(texts, out)))[-20:]
                 return out
             except Exception as e:
-                print(f"    Ollama 실패({e}) → 구글 번역으로 대신합니다.")
+                self.log(f"    Ollama 실패({e}) → 구글 번역으로 대신합니다.")
         return self._google_batch(texts)
 
     # 구글 번역(무료, 키 불필요) — 한 페이지 대사를 줄바꿈으로 묶어 한 번에 보낸다.
@@ -270,7 +273,7 @@ class Translator:
                 return parts
             return [self._google(t) for t in texts]
         except Exception as e:
-            print(f"    구글 번역 실패({e}) → MyMemory 로 대신합니다.")
+            self.log(f"    구글 번역 실패({e}) → MyMemory 로 대신합니다.")
             out = []
             for t in texts:
                 try:
@@ -438,10 +441,72 @@ def process_page(pil, ocr, translator, font_path, max_size):
     return out_pil, blocks
 
 
-def main():
+def detect_gpu(force_cpu=False):
+    if force_cpu:
+        return False
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+def default_output(src: Path):
+    return src.parent / f"{src.stem}_한국어"
+
+
+def run_job(src, out_dir, ocr, translator, font_path, max_font=40, redo=False,
+            log=print, on_page=None, should_stop=lambda: False):
+    """입력 하나(폴더/zip/이미지)를 번역한다. on_page(현재, 전체, 결과이미지)로 진행 상황을 알린다."""
+    src = Path(src)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pages = list(load_pages(src))
+    if not pages:
+        log(f"이미지가 없습니다: {src}")
+        return out_dir
+    started = time.time()
+    with open(out_dir / "번역문.txt", "a", encoding="utf-8") as tlog:
+        for i, (name, pil) in enumerate(pages, 1):
+            if should_stop():
+                log("중지했습니다.")
+                return out_dir
+            dest = out_dir / Path(name).with_suffix(".png")
+            if dest.exists() and not redo:
+                log(f"[{i}/{len(pages)}] {name} — 이미 있음, 건너뜀")
+                if on_page:
+                    on_page(i, len(pages), None)
+                continue
+            t = time.time()
+            try:
+                result, blocks = process_page(pil, ocr, translator, font_path, max_font)
+            except Exception as e:
+                log(f"[{i}/{len(pages)}] {name} — 실패: {e}")
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            result.save(dest)
+            tlog.write(f"\n=== {name} ===\n")
+            for b in blocks:
+                tlog.write(f"{b.text}\n → {b.ko}\n")
+            tlog.flush()
+            log(f"[{i}/{len(pages)}] {name} — 대사 {len(blocks)}개, {time.time() - t:.1f}초")
+            if on_page:
+                on_page(i, len(pages), result)
+
+    if src.suffix.lower() in {".zip", ".cbz"}:
+        zpath = out_dir.with_suffix(".zip")
+        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in sorted(out_dir.rglob("*.png"), key=natural_key):
+                zf.write(p, p.relative_to(out_dir))
+        log(f"zip 저장: {zpath}")
+    log(f"완료! {len(pages)}장, {time.time() - started:.0f}초 → {out_dir}")
+    return out_dir
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description="만화 이미지를 한국어로 자동 번역·식자합니다.")
-    ap.add_argument("input", help="이미지 폴더, zip/cbz, 또는 이미지 파일")
-    ap.add_argument("-o", "--output", help="결과 폴더 (기본: 입력이름_한국어)")
+    ap.add_argument("inputs", nargs="+", help="이미지 폴더, zip/cbz, 또는 이미지 파일 (여러 개 가능)")
+    ap.add_argument("-o", "--output", help="결과 폴더 (입력이 하나일 때만. 기본: 입력이름_한국어)")
     ap.add_argument("--lang", default="ja", choices=["ja", "en", "zh"], help="원문 언어 (기본 ja)")
     ap.add_argument("--engine", default="google", choices=["google", "ollama"], help="번역 엔진 (기본 google)")
     ap.add_argument("--ollama-model", default="qwen2.5:7b")
@@ -450,53 +515,21 @@ def main():
     ap.add_argument("--max-font", type=int, default=40, help="최대 글자 크기(px)")
     ap.add_argument("--cpu", action="store_true", help="그래픽카드가 있어도 CPU만 사용")
     ap.add_argument("--redo", action="store_true", help="이미 번역된 페이지도 다시 번역")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
-    src = Path(args.input).expanduser().resolve()
-    if not src.exists():
-        sys.exit(f"입력을 찾을 수 없습니다: {src}")
-    out_dir = Path(args.output) if args.output else src.parent / f"{src.stem}_한국어"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    srcs = [Path(p).expanduser().resolve() for p in args.inputs]
+    for s in srcs:
+        if not s.exists():
+            sys.exit(f"입력을 찾을 수 없습니다: {s}")
 
-    gpu = False
-    if not args.cpu:
-        try:
-            import torch
-            gpu = torch.cuda.is_available()
-        except ImportError:
-            pass
+    gpu = detect_gpu(args.cpu)
     print(f"원문: {LANG_NAMES[args.lang]} · 번역: {args.engine} · {'GPU' if gpu else 'CPU'} 사용")
-
     font_path = get_font_path(args.font)
     ocr = Ocr(args.lang, gpu)
     translator = Translator(args.engine, args.lang, args.ollama_model, args.ollama_url)
-
-    log = open(out_dir / "번역문.txt", "a", encoding="utf-8")
-    pages = list(load_pages(src))
-    started = time.time()
-    for i, (name, pil) in enumerate(pages, 1):
-        dest = out_dir / Path(name).with_suffix(".png")
-        if dest.exists() and not args.redo:
-            print(f"[{i}/{len(pages)}] {name} — 이미 있음, 건너뜀")
-            continue
-        t = time.time()
-        result, blocks = process_page(pil, ocr, translator, font_path, args.max_font)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        result.save(dest)
-        log.write(f"\n=== {name} ===\n")
-        for b in blocks:
-            log.write(f"{b.text}\n → {b.ko}\n")
-        log.flush()
-        print(f"[{i}/{len(pages)}] {name} — 대사 {len(blocks)}개, {time.time() - t:.1f}초")
-
-    log.close()
-    if src.suffix.lower() in {".zip", ".cbz"}:
-        zpath = out_dir.with_suffix(".zip")
-        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
-            for p in sorted(out_dir.rglob("*.png"), key=natural_key):
-                zf.write(p, p.relative_to(out_dir))
-        print(f"zip 저장: {zpath}")
-    print(f"\n완료! {len(pages)}장, {time.time() - started:.0f}초 → {out_dir}")
+    for s in srcs:
+        out = Path(args.output) if args.output and len(srcs) == 1 else default_output(s)
+        run_job(s, out, ocr, translator, font_path, args.max_font, args.redo)
 
 
 if __name__ == "__main__":

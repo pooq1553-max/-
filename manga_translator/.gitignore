@@ -1,2 +1,6 @@
 venv/
 fonts/
+build/
+dist/
+smoke/
+*.spec

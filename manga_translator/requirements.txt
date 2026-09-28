@@ -4,3 +4,4 @@ opencv-python-headless>=4.8
 numpy
 Pillow>=10.0
 requests
+tkinterdnd2

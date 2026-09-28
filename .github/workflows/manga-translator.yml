@@ -1,0 +1,94 @@
+name: Manga Translator (Windows app)
+
+# 만화 번역기를 Windows 실행 파일(MangaTranslator.exe)로 묶는다.
+# 실제 AI 모델로 번역 점검을 통과해야만 릴리스에 올린다.
+on:
+  push:
+    paths:
+      - 'manga_translator/**'
+      - '.github/workflows/manga-translator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: manga_translator
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (CPU torch keeps the app small)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt tkinterdnd2 pyinstaller
+
+      - name: Download fonts (Korean for the app, Japanese for the test page)
+        shell: bash
+        run: |
+          mkdir -p fonts
+          curl -sSfL -o fonts/NanumGothic-Bold.ttf https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/NanumGothic-Bold.ttf
+          curl -sSfL -o "$RUNNER_TEMP/jp.ttf" "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf"
+
+      - name: Smoke test from source (real OCR + translation)
+        shell: bash
+        run: python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- python translate_manga.py
+
+      - name: Build MangaTranslator.exe
+        run: >
+          pyinstaller app.py --name MangaTranslator --windowed --noconfirm --onedir
+          --add-data "fonts;fonts"
+          --collect-data manga_ocr --collect-data unidic_lite --collect-all fugashi
+          --collect-data easyocr --collect-all tkinterdnd2
+          --collect-submodules transformers.models.vision_encoder_decoder
+          --collect-submodules transformers.models.vit
+          --collect-submodules transformers.models.bert
+          --collect-submodules transformers.models.bert_japanese
+          --copy-metadata torch --copy-metadata transformers --copy-metadata tokenizers
+          --copy-metadata huggingface-hub --copy-metadata safetensors --copy-metadata tqdm
+          --copy-metadata regex --copy-metadata requests --copy-metadata packaging
+          --copy-metadata filelock --copy-metadata numpy --copy-metadata pyyaml
+
+      - name: Smoke test the built exe
+        shell: bash
+        run: python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- dist/MangaTranslator/MangaTranslator.exe
+
+      - name: Zip the app
+        run: |
+          Copy-Item README.md dist/MangaTranslator/사용법.txt
+          Compress-Archive -Path dist/MangaTranslator -DestinationPath MangaTranslator-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-output
+          path: manga_translator/smoke/pages_한국어
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: manga-translator-${{ github.run_number }}
+          name: "만화 번역기 (Windows) #${{ github.run_number }}"
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: manga_translator/MangaTranslator-windows.zip
+          body: |
+            **다운로드:** 아래 `MangaTranslator-windows.zip`
+
+            1. zip 을 풀고 `MangaTranslator` 폴더 안의 **MangaTranslator.exe** 를 더블클릭
+            2. 만화 폴더나 zip 을 창에 끌어다 놓고 **번역 시작**
+            3. 결과는 원본 옆 `이름_한국어` 폴더에 저장
+
+            처음 실행하면 AI 모델(약 1GB)을 내려받느라 몇 분 걸립니다.
+            "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행** 을 누르세요 (서명 안 된 무료 프로그램이라 뜨는 경고).
