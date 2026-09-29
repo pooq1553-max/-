@@ -282,6 +282,26 @@ class Translator:
         return r.json()["responseData"]["translatedText"]
 
     def _google_batch(self, texts):
+        out = self._google_batch_raw(self._as_sentences(texts))
+        return [self._polish(o, t) for o, t in zip(out, texts)]
+
+    def _as_sentences(self, texts):
+        # 끝맺음 부호가 없는 짧은 대사는 사전 뜻풀이처럼 번역되기 쉽다 (おはようございます → "인사")
+        # → 일본어·중국어는 마침표를 붙여 문장으로 번역하게 한다
+        if self.src not in ("ja", "zh-CN", "zh-TW"):
+            return texts
+        return [t if re.search(r"[。！？!?…」』）)～~ー♡♥]$", t) else t + "。" for t in texts]
+
+    HONORIFICS = {"senpai": "선배", "sempai": "선배", "sensei": "선생님", "onii-chan": "오빠", "onee-chan": "언니"}
+
+    def _polish(self, ko, src):
+        for k, v in self.HONORIFICS.items():
+            ko = re.sub(rf"(?<![A-Za-z]){k}(?![A-Za-z])", v, ko, flags=re.I)
+        if not re.search(r"[。.!?！？]$", src):
+            ko = re.sub(r"(?<=[가-힣])\.$", "", ko)  # 원문에 없던 마침표는 떼기
+        return ko.strip()
+
+    def _google_batch_raw(self, texts):
         try:
             joined = self._google("\n".join(texts))
             parts = [p.strip() for p in joined.split("\n")]
@@ -424,12 +444,26 @@ def typeset(pil, blk, region, font_path, max_size):
         ty += lh
 
 
-def clean_ocr(text):
+def fix_spanish_marks(text):
+    """OCR 이 거꾸로 된 느낌표·물음표(¡ ¿)를 j/i/Z 등으로 잘못 읽은 것을 되돌린다."""
+    def repl(m):
+        head, body, end = m.group(1), m.group(2), m.group(3)
+        if end == "!" and re.match(r"[jil1|]", head):
+            return "¡" + body + end
+        if end == "?" and re.match(r"[Zz2]", head):
+            return "¿" + body + end
+        return m.group(0)
+    return re.sub(r"(?:(?<=^)|(?<=[.!?…]\s))([jil1|Zz2])([A-ZÁÉÍÓÚÑÜ][^.!?…]*)([!?])", repl, text)
+
+
+def clean_ocr(text, lang="ja"):
     text = text.replace("．．．", "…").replace("...", "…").replace("・・・", "…")
     text = re.sub(r"\s+", " ", text).strip()
+    if lang == "es":
+        text = fix_spanish_marks(text)
     # 서양 만화는 대사가 전부 대문자인 경우가 많은데, 그대로 번역하면 품질이 떨어진다 → 문장 첫 글자만 대문자로
-    letters = [c for c in text if c.isalpha()]
-    if len(letters) >= 4 and all(c.isupper() for c in letters if c.lower() != c.upper()):
+    letters = [c for c in text if c.isalpha() and c.lower() != c.upper()]
+    if len(letters) >= 4 and sum(c.isupper() for c in letters) >= 0.85 * len(letters):
         text = re.sub(r"(^|[.!?¡¿…]\s*)(\w)", lambda m: m.group(1) + m.group(2).upper(), text.lower())
         text = re.sub(r"\bi\b", "I", text)
     return text
@@ -445,7 +479,7 @@ def process_page(pil, ocr, translator, font_path, max_size):
     blocks = group_blocks(boxes, labels, stats, img.shape[0] * img.shape[1], rtl=LANGS[getattr(ocr, "lang", "ja")][3])
 
     for b in blocks:
-        b.text = clean_ocr(ocr.read(img, b))
+        b.text = clean_ocr(ocr.read(img, b), getattr(ocr, "lang", "ja"))
     blocks = [b for b in blocks if b.text and not is_noise(b.text)]
 
     for b, ko in zip(blocks, translator.translate([b.text for b in blocks])):
