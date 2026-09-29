@@ -254,7 +254,32 @@ class Translator:
                 return out
             except Exception as e:
                 self.log(f"    Ollama 실패({e}) → 구글 번역으로 대신합니다.")
-        return self._google_batch(texts)
+        return self._google_with_phrasebook(texts)
+
+    # 무료 번역기가 자주 틀리는 짧은 일본어 인사말은 정해진 번역을 쓴다 (おはようございます → "인사" 같은 오역 방지)
+    JA_PHRASES = {
+        "おはようございます": "좋은 아침이에요", "おはよう": "좋은 아침",
+        "こんにちは": "안녕하세요", "こんばんは": "안녕하세요",
+        "ありがとうございます": "감사합니다", "ありがとう": "고마워",
+        "すみません": "죄송해요", "ごめんなさい": "미안해요", "ごめん": "미안",
+        "おやすみなさい": "안녕히 주무세요", "おやすみ": "잘 자",
+        "いただきます": "잘 먹겠습니다", "ごちそうさまでした": "잘 먹었습니다",
+        "ただいま": "다녀왔어", "おかえりなさい": "어서 와요", "おかえり": "어서 와",
+        "いってきます": "다녀올게", "いってらっしゃい": "잘 다녀와",
+        "よろしくお願いします": "잘 부탁드려요", "お疲れ様です": "수고하셨어요",
+    }
+
+    def _google_with_phrasebook(self, texts):
+        fixed = {}
+        if self.src == "ja":
+            for i, t in enumerate(texts):
+                m = re.fullmatch(r"(.+?)([。！？!?…ー～~♡♥]*)", t)
+                if m and m.group(1) in self.JA_PHRASES:
+                    tail = m.group(2).replace("。", "").replace("！", "!").replace("？", "?").replace("ー", "").replace("～", "~")
+                    fixed[i] = self.JA_PHRASES[m.group(1)] + tail
+        rest = [t for i, t in enumerate(texts) if i not in fixed]
+        done = iter(self._google_batch(rest) if rest else [])
+        return [fixed[i] if i in fixed else next(done) for i in range(len(texts))]
 
     # 구글 번역(무료, 키 불필요) — 한 페이지 대사를 줄바꿈으로 묶어 한 번에 보낸다.
     def _google(self, text):
@@ -292,11 +317,12 @@ class Translator:
             return texts
         return [t if re.search(r"[。！？!?…」』）)～~ー♡♥]$", t) else t + "。" for t in texts]
 
-    HONORIFICS = {"senpai": "선배", "sempai": "선배", "sensei": "선생님", "onii-chan": "오빠", "onee-chan": "언니"}
+    HONORIFICS = {"senpai": "선배", "sempai": "선배", "sensei": "선생님", "onii-chan": "오빠", "onee-chan": "언니",
+                  "센파이": "선배", "센빠이": "선배", "센세이": "선생님", "오니쨩": "오빠", "오네쨩": "언니"}
 
     def _polish(self, ko, src):
         for k, v in self.HONORIFICS.items():
-            ko = re.sub(rf"(?<![A-Za-z]){k}(?![A-Za-z])", v, ko, flags=re.I)
+            ko = re.sub(rf"(?<![A-Za-z가-힣]){k}(?![A-Za-z])", v, ko, flags=re.I)
         if not re.search(r"[。.!?！？]$", src):
             ko = re.sub(r"(?<=[가-힣])\.$", "", ko)  # 원문에 없던 마침표는 떼기
         return ko.strip()
