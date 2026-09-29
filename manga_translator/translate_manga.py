@@ -134,7 +134,8 @@ class Ocr:
         langs = LANGS[lang][1]
         log("OCR 모델 불러오는 중... (첫 실행 때는 모델 다운로드로 몇 분 걸립니다)")
         self.lang = lang
-        self.reader = easyocr.Reader(langs, gpu=gpu, verbose=False)
+        # quantize=False: 양자화 모델은 오래된 CPU에서 "잘못된 명령어"(0xC000001D)로 죽는다
+        self.reader = easyocr.Reader(langs, gpu=gpu, verbose=False, quantize=False)
         self.mocr = None
         if lang == "ja":
             from manga_ocr import MangaOcr
