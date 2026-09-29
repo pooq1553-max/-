@@ -48,7 +48,9 @@ jobs:
 
       - name: Smoke test from source (real OCR + translation)
         shell: bash
-        run: python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- python translate_manga.py
+        run: |
+          python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- python translate_manga.py
+          python tools/smoke_test.py "C:/Windows/Fonts/arialbd.ttf" --lang es -- python translate_manga.py
 
       - name: Build MangaTranslator.exe
         run: >
@@ -70,6 +72,7 @@ jobs:
         shell: bash
         run: |
           ls dist/MangaTranslator/_internal/torchvision | grep -iE "\.(pyd|dll)$" || echo "no torchvision binaries"
+          python tools/smoke_test.py "C:/Windows/Fonts/arialbd.ttf" --lang es -- dist/MangaTranslator/MangaTranslator.exe
           python tools/smoke_test.py "$RUNNER_TEMP/jp.ttf" -- dist/MangaTranslator/MangaTranslator.exe
 
       - name: Zip the app

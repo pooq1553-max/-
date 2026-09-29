@@ -1,6 +1,6 @@
 # 만화 자동 번역기 (무료)
 
-만화 이미지 폴더나 zip 파일을 넣으면 일본어, 영어, 중국어 대사를 **한국어로 번역해 말풍선에 넣어 줍니다.**
+만화 이미지 폴더나 zip 파일을 넣으면 외국어 대사를 **한국어로 번역해 말풍선에 넣어 줍니다.**
 수십 장을 한 번에 넣어도 알아서 순서대로 처리합니다. 유료 API는 쓰지 않습니다.
 
 | 단계 | 사용 도구 (전부 무료) |
@@ -9,6 +9,8 @@
 | 일본어 읽기 | manga-ocr (세로쓰기 지원, 내 PC에서 실행) |
 | 번역 | 구글 번역 무료 주소(키 불필요). 실패하면 MyMemory로 대신 번역. 또는 Ollama 로컬 AI |
 | 원문 지우기 + 한글 넣기 | OpenCV, 나눔고딕 |
+
+**지원 언어:** 일본어, 영어, 스페인어, 중국어(간체/번체), 프랑스어, 독일어, 포르투갈어, 이탈리아어, 러시아어, 인도네시아어, 베트남어, 태국어. 창의 **원문 언어**에서 고르면 됩니다.
 
 ## 사용법 (Windows 프로그램, 설치 필요 없음)
 
@@ -33,6 +35,7 @@ macOS/Linux에서는 `./run.sh 만화폴더`를 씁니다.
 ```
 python translate_manga.py 만화폴더 --lang en          # 영어 만화
 python translate_manga.py 만화폴더 --lang zh          # 중국어 만화
+python translate_manga.py 만화폴더 --lang es          # 스페인어 만화
 python translate_manga.py 만화폴더 --max-font 32      # 글자를 더 작게
 python translate_manga.py 만화폴더 --font 내폰트.ttf  # 원하는 폰트로 식자
 python translate_manga.py 만화폴더 --redo             # 전부 다시 번역

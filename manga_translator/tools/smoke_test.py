@@ -16,6 +16,13 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+# 스페인어(가로쓰기) 테스트 대사
+LINES_ES = [
+    (250, 260, ["¡HOLA! ¿CÓMO", "ESTÁS HOY?"]),
+    (650, 300, ["HACE MUY", "BUEN TIEMPO"]),
+    (330, 820, ["¡GRACIAS,", "AMIGO!"]),
+]
+
 LINES = [
     (250, 260, ["おはよう", "ございます"]),
     (650, 300, ["今日は", "いい天気", "ですね"]),
@@ -23,8 +30,9 @@ LINES = [
 ]
 
 
-def make_pages(font_path, out_dir: Path):
+def make_pages(font_path, out_dir: Path, lang="ja"):
     font = ImageFont.truetype(font_path, 34)
+    lines = LINES if lang == "ja" else LINES_ES
     out_dir.mkdir(parents=True, exist_ok=True)
     for n in range(2):
         img = Image.new("RGB", (900, 1200), "white")
@@ -32,7 +40,16 @@ def make_pages(font_path, out_dir: Path):
         d.rectangle((20, 20, 880, 1180), outline="black", width=4)
         for x in range(24, 880, 14):
             d.line((x, 24, x, 1176), fill=(170, 170, 170), width=2)
-        for cx, cy, cols in LINES:
+        for cx, cy, cols in lines:
+            if lang != "ja":  # 가로쓰기: 한 줄씩 가운데 정렬
+                w = max(d.textlength(c, font=font) for c in cols)
+                rx, ry = w / 2 + 50, 25 * len(cols) + 45
+                d.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill="white", outline="black", width=4)
+                y = cy - 21 * len(cols)
+                for c in cols:
+                    d.text((cx - d.textlength(c, font=font) / 2, y), c, font=font, fill="black")
+                    y += 42
+                continue
             rx = 60 + 38 * len(cols)
             ry = 40 + 20 * max(len(c) for c in cols)
             d.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill="white", outline="black", width=4)
@@ -48,11 +65,14 @@ def make_pages(font_path, out_dir: Path):
 
 def main():
     font_path = sys.argv[1]
+    lang = sys.argv[sys.argv.index("--lang") + 1] if "--lang" in sys.argv[:sys.argv.index("--")] else "ja"
     cmd = sys.argv[sys.argv.index("--") + 1:]
+    if lang != "ja":
+        cmd += ["--lang", lang]
     work = Path("smoke")
     shutil.rmtree(work, ignore_errors=True)
     src = work / "pages"
-    make_pages(font_path, src)
+    make_pages(font_path, src, lang)
 
     try:
         rc = subprocess.run(cmd + [str(src)], timeout=900).returncode

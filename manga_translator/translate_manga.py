@@ -42,7 +42,23 @@ SYSTEM_FONTS = [
     "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
 ]
-LANG_NAMES = {"ja": "일본어", "en": "영어", "zh": "중국어"}
+# 코드: (이름, EasyOCR 언어, 구글 번역 언어, 오른쪽→왼쪽으로 읽는지)
+LANGS = {
+    "ja": ("일본어", ["ja", "en"], "ja", True),
+    "en": ("영어", ["en"], "en", False),
+    "es": ("스페인어", ["es", "en"], "es", False),
+    "zh": ("중국어(간체)", ["ch_sim", "en"], "zh-CN", False),
+    "zh-tw": ("중국어(번체)", ["ch_tra", "en"], "zh-TW", False),
+    "fr": ("프랑스어", ["fr", "en"], "fr", False),
+    "de": ("독일어", ["de", "en"], "de", False),
+    "pt": ("포르투갈어", ["pt", "en"], "pt", False),
+    "it": ("이탈리아어", ["it", "en"], "it", False),
+    "ru": ("러시아어", ["ru", "en"], "ru", False),
+    "id": ("인도네시아어", ["id", "en"], "id", False),
+    "vi": ("베트남어", ["vi", "en"], "vi", False),
+    "th": ("태국어", ["th", "en"], "th", False),
+}
+LANG_NAMES = {k: v[0] for k, v in LANGS.items()}
 
 
 # ───────────────────────── 입력/출력 ─────────────────────────
@@ -115,7 +131,7 @@ class Block:
 class Ocr:
     def __init__(self, lang, gpu, log=print):
         import easyocr
-        langs = {"ja": ["ja", "en"], "en": ["en"], "zh": ["ch_sim", "en"]}[lang]
+        langs = LANGS[lang][1]
         log("OCR 모델 불러오는 중... (첫 실행 때는 모델 다운로드로 몇 분 걸립니다)")
         self.lang = lang
         self.reader = easyocr.Reader(langs, gpu=gpu, verbose=False)
@@ -166,7 +182,7 @@ def bubble_of(box, labels, stats, img_area):
     return lab
 
 
-def group_blocks(boxes, labels, stats, img_area):
+def group_blocks(boxes, labels, stats, img_area, rtl=True):
     """가까운 글자 조각을 하나의 대사 덩어리로 묶는다. 서로 다른 말풍선끼리는 묶지 않는다."""
     if not boxes:
         return []
@@ -204,8 +220,8 @@ def group_blocks(boxes, labels, stats, img_area):
         blk = Block(min(xs0), min(ys0), max(xs1), max(ys1), c, bubs[idx[0]])
         if blk.w * blk.h >= (char * 0.6) ** 2:
             blocks.append(blk)
-    # 읽는 순서: 위→아래, 같은 높이면 오른쪽→왼쪽(일본 만화 기준)
-    blocks.sort(key=lambda b: (round(b.y0 / (char * 4)), -b.x1))
+    # 읽는 순서: 위→아래, 같은 높이면 일본 만화는 오른쪽→왼쪽, 나머지는 왼쪽→오른쪽
+    blocks.sort(key=lambda b: (round(b.y0 / (char * 4)), -b.x1 if rtl else b.x0))
     return blocks
 
 
@@ -220,7 +236,7 @@ class Translator:
     def __init__(self, engine, src, ollama_model, ollama_url, log=print):
         self.log = log
         self.engine = engine
-        self.src = {"zh": "zh-CN"}.get(src, src)
+        self.src = LANGS[src][2]
         self.src_name = LANG_NAMES[src]
         self.ollama_model = ollama_model
         self.ollama_url = ollama_url.rstrip("/")
@@ -410,7 +426,13 @@ def typeset(pil, blk, region, font_path, max_size):
 
 def clean_ocr(text):
     text = text.replace("．．．", "…").replace("...", "…").replace("・・・", "…")
-    return re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
+    # 서양 만화는 대사가 전부 대문자인 경우가 많은데, 그대로 번역하면 품질이 떨어진다 → 문장 첫 글자만 대문자로
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) >= 4 and all(c.isupper() for c in letters if c.lower() != c.upper()):
+        text = re.sub(r"(^|[.!?¡¿…]\s*)(\w)", lambda m: m.group(1) + m.group(2).upper(), text.lower())
+        text = re.sub(r"\bi\b", "I", text)
+    return text
 
 
 # ───────────────────────── 메인 ─────────────────────────
@@ -420,7 +442,7 @@ def process_page(pil, ocr, translator, font_path, max_size):
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     labels, stats = light_components(gray)
     boxes = ocr.detect(img)
-    blocks = group_blocks(boxes, labels, stats, img.shape[0] * img.shape[1])
+    blocks = group_blocks(boxes, labels, stats, img.shape[0] * img.shape[1], rtl=LANGS[getattr(ocr, "lang", "ja")][3])
 
     for b in blocks:
         b.text = clean_ocr(ocr.read(img, b))
@@ -507,7 +529,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="만화 이미지를 한국어로 자동 번역·식자합니다.")
     ap.add_argument("inputs", nargs="+", help="이미지 폴더, zip/cbz, 또는 이미지 파일 (여러 개 가능)")
     ap.add_argument("-o", "--output", help="결과 폴더 (입력이 하나일 때만. 기본: 입력이름_한국어)")
-    ap.add_argument("--lang", default="ja", choices=["ja", "en", "zh"], help="원문 언어 (기본 ja)")
+    ap.add_argument("--lang", default="ja", choices=list(LANGS), help="원문 언어 (기본 ja): " + ", ".join(f"{k}={v[0]}" for k, v in LANGS.items()))
     ap.add_argument("--engine", default="google", choices=["google", "ollama"], help="번역 엔진 (기본 google)")
     ap.add_argument("--ollama-model", default="qwen2.5:7b")
     ap.add_argument("--ollama-url", default="http://localhost:11434")

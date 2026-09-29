@@ -40,7 +40,7 @@ try:
 except Exception:  # 끌어다 놓기는 없어도 버튼으로 쓸 수 있다
     TkinterDnD = None
 
-LANGS = [("일본어", "ja"), ("영어", "en"), ("중국어", "zh")]
+LANGS = [(v[0], k) for k, v in tm.LANGS.items()]
 ENGINES = [("구글 번역 (무료)", "google"), ("Ollama 로컬 AI (무료, 고품질)", "ollama")]
 
 
