@@ -632,7 +632,8 @@ def render_text(p):
     if dd and dd.get("dates"):
         evs = {}
         for e in p.get("events") or []:
-            evs.setdefault(e["date"], []).append(e)
+            if e.get("mkt", "US") == "US":
+                evs.setdefault(e["date"], []).append(e)
         add("■ 요일별 흐름 (미장)")
         for i, d in enumerate(dd["dates"]):
             parts = []
@@ -1041,8 +1042,10 @@ if (D.notes && D.notes.length) {
 if (D.daily && D.daily.us && D.daily.us.dates.length) {
   const s = section("days", "요일별 흐름", "요일별 흐름 — 무슨 날 출렁였나",
     "하루 단위 등락과 그날 시장을 움직인 발언·뉴스. 금리는 bp 변화, VIX는 종가 수준.");
-  const ev = {};
-  (D.events || []).forEach(e => (ev[e.date] = ev[e.date] || []).push(e));
+  // 사건은 시장별로 나눈다 (mkt 없으면 미장)
+  const evOf = mkt => { const m = {};
+    (D.events || []).filter(e => (e.mkt || "US") === mkt).forEach(e => (m[e.date] = m[e.date] || []).push(e));
+    return m; };
   const cell = (c, v) => {
     if (v === null || v === undefined) return `<td class="muted">–</td>`;
     if (c.kind === "bp") return `<td class="${cls(v)}">${v > 0 ? "+" : ""}${v}bp</td>`;
@@ -1050,7 +1053,8 @@ if (D.daily && D.daily.us && D.daily.us.dates.length) {
     if (c.kind === "won") return `<td class="${cls(-v)}">${v > 0 ? "+" : ""}${v.toFixed(1)}원</td>`;
     return `<td class="${cls(v)}"><b>${pc(v)}</b></td>`;
   };
-  const table = (dd, title, withEv) => {
+  const table = (dd, title, mkt) => {
+    const ev = evOf(mkt), withEv = Object.keys(ev).some(d => dd.iso.includes(d));
     const head = `<tr><th>날짜</th>${dd.cols.map(c => `<th>${esc(c.name)}</th>`).join("")}${withEv ? "<th style='text-align:left'>무슨 일이 있었나</th>" : ""}</tr>`;
     const rows = dd.dates.map((d, i) => {
       const es = ev[dd.iso[i]] || [];
@@ -1059,8 +1063,8 @@ if (D.daily && D.daily.us && D.daily.us.dates.length) {
     }).join("");
     return card(s, title, "", `<div class="tbl tl"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`);
   };
-  table(D.daily.us, "미장", true);
-  if (D.daily.kr && D.daily.kr.dates.length) table(D.daily.kr, "국장", (D.events || []).some(e => D.daily.kr.iso.includes(e.date) && e.mkt === "KR")).style.marginTop = "14px";
+  table(D.daily.us, "미장", "US");
+  if (D.daily.kr && D.daily.kr.dates.length) table(D.daily.kr, "국장", "KR").style.marginTop = "14px";
 }
 
 /* 2. 매크로 */
