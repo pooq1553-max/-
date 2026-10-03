@@ -1,0 +1,105 @@
+[
+  {
+    "date": "2026-09-28",
+    "h": "트럼프, 이란 휴전·호르무즈 재개 제안 거부 → 유가·금리 반등",
+    "b": "지난 금요일(9/26) 트럼프 대통령이 이란의 휴전 제안을 두고 **\"제안을 거부한다(I reject their proposal)\"**고 말했습니다. 월요일 브렌트유가 장중 108달러대까지 오르고 10년물이 +6bp, S&P -0.77%, 나스닥 -0.92%. 장중 이란 핵 관련 제재 완화 검토 보도로 낙폭은 줄었습니다. 같은 날 연휴를 마친 코스피는 **-2.70%**.",
+    "src": [
+      {
+        "t": "TheStreet 9/28",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-sept-28-2026"
+      },
+      {
+        "t": "Washington Post 9/26",
+        "u": "https://www.washingtonpost.com/national-security/2026/09/26/trump-rejects-iran-proposal-reopen-strait-hormuz-restart-peace-talks/"
+      },
+      {
+        "t": "CNBC 유가 9/28",
+        "u": "https://www.cnbc.com/2026/09/28/oil-price-today-wti-brent-trump-iran.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-09-29",
+    "h": "30년물 5.61% 2002년 이후 최고 vs 윌리엄스 \"서두를 필요 없다\"",
+    "b": "30년물 금리가 장중 5.61%로 2002년 이후 최고를 찍으며 10월 인상 확률이 72.5%까지 올랐습니다. 그런데 윌리엄스 뉴욕연은 총재가 **\"서두를 필요가 없다(no need for urgency)\"**, 추가 인상은 \"연말에 한 번이면 적절할 수 있다\"고 말하자 10월 인상 베팅이 반반 수준으로 줄었습니다. 지수는 소폭 하락, WTI는 -3.5%.",
+    "src": [
+      {
+        "t": "US News/Reuters 9/29",
+        "u": "https://money.usnews.com/investing/news/articles/2026-09-29/feds-williams-sees-no-urgency-for-next-fed-rate-hike"
+      },
+      {
+        "t": "CNBC 금리 9/29",
+        "u": "https://www.cnbc.com/2026/09/29/treasury-yields-bonds.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-09-30",
+    "h": "PCE 물가는 예상보다 낮았지만 성장률 상향에 금리 버팀 · 장후 마이크론 실적",
+    "b": "연준이 가장 중시하는 근원 PCE가 3.0%로 예상보다 낮게 나와 오전엔 올랐지만, 상반기 성장률이 상향 수정되며 금리가 높게 유지돼 S&P -0.25%, 다우 -0.9%로 마감했습니다. 9월 한 달 다우 -4.3%, 나스닥 +1.9%. 장 마감 후 마이크론은 매출 542억 달러로 예상을 넘었지만 시간외 -0.8%로 반응이 미지근했습니다.",
+    "src": [
+      {
+        "t": "TheStreet 9/30",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-sept-30-2026"
+      },
+      {
+        "t": "Yahoo Finance 9/30",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-wednesday-september-30-dow-sp-500-nasdaq-080339262.html"
+      },
+      {
+        "t": "CNBC 마이크론",
+        "u": "https://www.cnbc.com/2026/09/30/micron-mu-q4-earnings-report-2026.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-01",
+    "h": "금리 한숨 돌리자 반도체 반등 · 장후 나이키 실적 쇼크",
+    "b": "10년물이 -6bp 되돌리면서 반도체지수 +1.59%, 지수는 보합권 상승으로 10월을 시작했습니다. 장 마감 후 나이키가 매출과 이익 모두 예상을 밑돌고 신중한 연간 전망을 내놔 시간외 **-8%**대로 밀렸습니다.",
+    "src": [
+      {
+        "t": "TheStreet 10/1",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-oct-01-2026"
+      },
+      {
+        "t": "Yahoo Finance 10/1",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-thursday-oct-1-dow-sp-500-nasdaq-080602402.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-02",
+    "h": "9월 고용 2.9만 명 쇼크 → 금리 인상 기대 꺾이며 기술주 랠리",
+    "b": "9월 비농업 고용이 **2.9만 명**(예상 8.4만 명)에 그치고 실업률은 4.2%로 올랐습니다. 7~8월 수치도 합쳐서 6만 명 하향. 나쁜 고용이 오히려 호재로 읽혀 10월 동결 확률이 77%로 올랐고, 나스닥 **+1.19%**, S&P +0.73%. 발표 직후 10년물은 6bp 가까이 내렸습니다(표의 금리는 장 마감 기준).",
+    "src": [
+      {
+        "t": "CNBC 고용 10/2",
+        "u": "https://www.cnbc.com/2026/10/02/jobs-report-september-2026.html"
+      },
+      {
+        "t": "Yahoo Finance 10/2",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-friday-october-2-dow-sp-500-nasdaq-september-jobs-report-080623878.html"
+      },
+      {
+        "t": "Motley Fool 10/2",
+        "u": "https://www.fool.com/coverage/stock-market-today/2026/10/02/stock-market-midday-oct-2-stocks-rally-as-weak-jobs-data-cools-fed-rate-hike-bets/"
+      }
+    ]
+  },
+  {
+    "date": "2026-09-28",
+    "mkt": "KR",
+    "h": "연휴 끝 코스피 -2.70%: 삼성전자·하이닉스 5% 넘게 급락",
+    "b": "추석 연휴 동안 미국 장기금리와 유가가 오른 충격이 한꺼번에 반영됐습니다. 외국인이 하루에만 3.23조, 기관이 1.02조를 팔았고 개인이 받았습니다. 외국인은 9월 한 달 21.5조를 팔았는데 삼성전자·SK하이닉스가 중심이었습니다.",
+    "src": [
+      {
+        "t": "서울경제 9/28",
+        "u": "https://en.sedaily.com/finance/2026/09/28/kospi-falls-back-below-7000-as-chip-stocks-lead-selloff"
+      },
+      {
+        "t": "서울경제 9/30",
+        "u": "https://en.sedaily.com/finance/2026/09/30/foreign-investors-dump-215-trillion-won-in-september-led-by"
+      }
+    ]
+  }
+]
