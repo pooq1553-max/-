@@ -1,0 +1,24 @@
+name: RSI Backtest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/rsi-backtest*']
+    paths: ['rsi_backtest.py', '.github/workflows/rsi-backtest.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install yfinance pandas numpy
+      - name: SOXL 전체기간
+        run: python rsi_backtest.py --ticker SOXL --fee 0.1
+      - name: SOXL 최근 5년
+        run: python rsi_backtest.py --ticker SOXL --start 2021-10-01 --fee 0.1
