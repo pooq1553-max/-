@@ -26,7 +26,8 @@ def load_prices(ticker, start, end, csv_path=None):
         close = df["Close"]
     else:
         import yfinance as yf
-        df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
+        kw = {"start": start} if start else {"period": "max"}
+        df = yf.download(ticker, end=end, auto_adjust=True, progress=False, **kw)
         if df.empty:
             sys.exit(f"{ticker} 가격을 받지 못했습니다.")
         close = df["Close"]
