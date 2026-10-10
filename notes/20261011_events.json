@@ -1,0 +1,109 @@
+[
+  {
+    "date": "2026-10-05",
+    "h": "엔비디아 사상 최고, 나스닥 신기록: 금리 5.31%도 무시",
+    "b": "AI 관련주가 이끌며 엔비디아가 사상 최고가, 나스닥이 **+1.05%**로 사상 최고 종가(27,477)를 찍었습니다. 10년물은 +3bp 올라 5.31%였고, ISM 서비스업 지수는 54.9로 예상(55.7)보다 낮았지만 가격지수는 74로 올라 물가 압력은 여전했습니다.",
+    "src": [
+      {
+        "t": "TheStreet 10/5",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-oct-05-2026"
+      },
+      {
+        "t": "Yahoo Finance 10/5",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-monday-october-5-dow-sp-500-nasdaq-081220790.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-06",
+    "h": "S&P500 8월 이후 첫 사상 최고, 처음으로 7,800 위 마감",
+    "b": "유가와 금리가 진정되자 S&P500이 **+0.58%**로 사상 최고 종가(7,818)를 기록했습니다. 다만 S&P500 종목 중 50일 이동평균 위에 있는 종목은 25%뿐이라는 분석이 나올 만큼 기술주 위주의 좁은 상승이었습니다.",
+    "src": [
+      {
+        "t": "TheStreet 10/6",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-oct-06-2026"
+      },
+      {
+        "t": "CNBC 10/6",
+        "u": "https://www.cnbc.com/2026/10/05/stock-market-today-live-updates.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-07",
+    "h": "FOMC 의사록: \"연내 한 번 더 인상 가능성 높다\", 10월은 아님",
+    "b": "9월 회의록에서 연준 위원 대부분이 **연말까지 추가 인상이 필요할 가능성이 높다**고 본 것으로 나왔습니다. 다만 시기는 밝히지 않아 10월 인상 확률은 20% 안팎으로 낮아졌습니다. 이날 10년물이 장중 2002년 이후 최고(약 5.3%)까지 오르고 캐터필러가 6% 가까이 빠지며 S&P -0.22%, 러셀2000 -1.31%.",
+    "src": [
+      {
+        "t": "CNBC 의사록 10/7",
+        "u": "https://www.cnbc.com/2026/10/07/fed-officials-see-another-hike-coming-but-no-sign-as-to-when-minutes-show.html"
+      },
+      {
+        "t": "Yahoo Finance 10/7",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-wednesday-october-7-dow-sp-500-nasdaq-080241833.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-08",
+    "h": "오픈AI 매출 보도에 AI주 급락 + 호르무즈 유조선 공격·허리케인에 유가 +4%",
+    "b": "오픈AI의 연환산 매출이 알려진 것보다 약 200억 달러 적다는 FT 보도에 오라클 -5%대, 엔비디아·AMD -3~4%로 AI주가 무너져 반도체지수 **-3.39%**, 나스닥 -1.25%. 같은 날 호르무즈 해협 유조선 공격과 허리케인 '이사이아스'로 멕시코만 생산 차질 우려가 겹쳐 WTI가 **+3.6%**(91.49달러). 트럼프 대통령이 중간선거 전에는 이란을 공격하지 않겠다고 하자 유가 상승폭은 줄었습니다.",
+    "src": [
+      {
+        "t": "CNN 10/8",
+        "u": "https://edition.cnn.com/2026/10/08/investing/openai-nasdaq-stocks"
+      },
+      {
+        "t": "Yahoo Finance 10/8",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-thursday-october-8-dow-sp-500-nasdaq-080537884.html"
+      },
+      {
+        "t": "CNBC 유가 10/8",
+        "u": "https://www.cnbc.com/2026/10/08/oil-prices-today-brent-wti-hormuz.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-09",
+    "h": "실적 시즌 앞두고 반등, 3대 지수 모두 주간 상승",
+    "b": "금리와 유가가 조금 내려오며 다우 +0.83%, S&P +0.59%, 나스닥 +0.64%로 마감했고 3대 지수가 모두 주간 상승으로 끝났습니다. 휴매나가 13% 급등했고, 다음 주 대형 은행 실적으로 3분기 실적 시즌이 시작됩니다.",
+    "src": [
+      {
+        "t": "TheStreet 10/9",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-dow-jones-sp-500-nasdaq-updates-oct-09-2026"
+      },
+      {
+        "t": "Yahoo Finance 10/9",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-friday-october-9-dow-sp-500-nasdaq-080148117.html"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-07",
+    "mkt": "KR",
+    "h": "월가 신기록에도 코스피 -1.98%: 외국인 2.61조 매도",
+    "b": "전날 미국이 사상 최고를 찍었는데도 외국인이 2.61조, 기관이 6,726억을 팔고 개인이 2.56조를 받았습니다. 삼성전자 3분기 잠정실적 발표를 앞둔 경계감도 작용했습니다. SK하이닉스 -2.82%, 삼성전자 -1.29%.",
+    "src": [
+      {
+        "t": "Korea Times 10/7",
+        "u": "https://www.koreatimes.co.kr/economy/20261007/seoul-stocks-fall-as-foreign-profit-taking-samsung-earnings-caution-weigh-on-investor-sentiment"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-08",
+    "mkt": "KR",
+    "h": "코스피 사흘째 하락 -2.62%, 6,626: 연고점 대비 약 30% 아래",
+    "b": "외국인 1.99조, 기관 1.67조 순매도로 코스피가 6,626에 마감했습니다. 6월 연고점 대비 30% 가까이 내려온 수준입니다. 전날 밤 미국 AI주 급락 소식과 겹쳤습니다.",
+    "src": [
+      {
+        "t": "Herald Business",
+        "u": "https://biz.heraldcorp.com/article/10897499"
+      },
+      {
+        "t": "IBTimes",
+        "u": "https://ibtimes.com.au/south-korea-stocks-fall-samsung-profit-forecast-1876482"
+      }
+    ]
+  }
+]
