@@ -1,3 +1,11 @@
 __pycache__/
 *.pyc
 reports/
+
+# 쇼츠 자동화: 미디어 파일은 용량이 커서 git에 올리지 않음 (폴더 구조만 유지)
+input/*
+output/*
+audio/*
+frames/*
+backup/*
+!*/.gitkeep
