@@ -38,3 +38,14 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
 
 - `--text`를 안 주면 `input/자막.txt`의 첫 줄, 그것도 없으면 기본 문구를 씁니다.
 - 원본이 30초보다 짧으면 그 길이만큼만 만듭니다. 가로 영상은 확대 후 가운데를 잘라 양옆이 잘립니다.
+
+## 2단계 실행: 장면 나누기 → frames/ 사진 + output/scenes.json
+
+실행: `.venv/bin/python scripts/scenes.py` (Windows: `.venv\Scripts\python scripts\scenes.py`)
+
+- `frames/scene_001_a.jpg`, `_b.jpg` …: 장면마다 대표 사진 2장 (장면의 1/3, 2/3 지점)
+- `frames/한눈에보기.jpg`: 모든 대표 사진을 한 장에 모은 것 (제외된 장면은 빨간 X)
+- `output/scenes.json`: 장면마다 `idx`, `start`/`end`(초), `shot_type`(고정/움직임/빠른 움직임), `description`(지금은 빈칸),
+  `features`(sharpness 선명도, brightness 밝기, saturation 채도, warmth 따뜻함, motion 움직임), `excluded`(제외 여부)와 이유
+- 장면이 너무 잘게/크게 나뉘면 `--threshold` 숫자를 바꿉니다 (낮을수록 잘게, 기본 27).
+- 장면을 읽는 방식은 `scripts/scene_analyzers.py`에 있습니다. 나중에 AI 분석기를 여기에 추가하고 `--analyzer 이름`으로 고릅니다.
