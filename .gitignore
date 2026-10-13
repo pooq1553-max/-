@@ -9,3 +9,8 @@ audio/*
 frames/*
 backup/*
 !*/.gitkeep
+
+# API 키가 든 파일은 절대 git에 올리지 않음 (.env.example 은 예시라 올림)
+.env
+.env.*
+!.env.example

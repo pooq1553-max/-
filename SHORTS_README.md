@@ -20,3 +20,10 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
 
 - `input`, `audio`, `frames`, `output`, `backup` 안의 파일은 용량 때문에 git에 올라가지 않습니다(`.gitignore`). 코드(`scripts/`)만 저장소에 저장됩니다.
 - `frames/`는 임시 폴더라 작업이 끝나면 비워도 됩니다.
+
+## API 키 (.env)
+
+- 키는 프로젝트 맨 위의 `.env` 파일에만 적습니다. `.env.example`을 복사해 `.env`로 이름을 바꾸고 `GEMINI_API_KEY=` 뒤에 키를 붙여 넣으세요.
+- `.env`는 `.gitignore`에 들어 있어 GitHub에 올라가지 않습니다.
+- 코드에서는 `scripts/config.py`의 `get_gemini_api_key()`로만 키를 읽습니다.
+- 확인: `python scripts/check_key.py` → `키가 들어 있음, 글자 수 N개` (키 내용은 표시하지 않음)
