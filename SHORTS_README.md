@@ -27,3 +27,14 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
 - `.env`는 `.gitignore`에 들어 있어 GitHub에 올라가지 않습니다.
 - 코드에서는 `scripts/config.py`의 `get_gemini_api_key()`로만 키를 읽습니다.
 - 확인: `python scripts/check_key.py` → `키가 들어 있음, 글자 수 N개` (키 내용은 표시하지 않음)
+
+## 1단계 실행: 원본 영상 → 30초 세로 쇼츠
+
+준비(한 번만): `python3 -m venv .venv` 후 `.venv/bin/pip install -r requirements.txt` (Windows는 `.venv\Scripts\pip`), ffmpeg 설치.
+
+1. 영상을 `input/원본.mp4` 로 넣습니다.
+2. 실행: `.venv/bin/python scripts/step1.py --text "자막 문구"` (Windows: `.venv\Scripts\python scripts\step1.py --text "자막 문구"`)
+3. 결과: `output/step1.mp4` (1080x1920, 30fps, H.264, 최대 30초)
+
+- `--text`를 안 주면 `input/자막.txt`의 첫 줄, 그것도 없으면 기본 문구를 씁니다.
+- 원본이 30초보다 짧으면 그 길이만큼만 만듭니다. 가로 영상은 확대 후 가운데를 잘라 양옆이 잘립니다.
