@@ -2,9 +2,13 @@
 
 키 값은 절대 출력하거나 로그에 남기지 않는다. 오류 메시지에도 키를 넣지 않는다.
 """
+import os
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 코드가 있는 폴더 (scripts/, web/, config/ 원본)
+CODE_ROOT = Path(__file__).resolve().parent.parent
+# 데이터 폴더 (input/, output/, data/ …). 테스트할 때만 SHORTS_ROOT 로 다른 폴더를 쓴다.
+PROJECT_ROOT = Path(os.environ.get("SHORTS_ROOT") or CODE_ROOT).resolve()
 ENV_PATH = PROJECT_ROOT / ".env"
 PLACEHOLDER = "여기에키를붙여넣기"
 

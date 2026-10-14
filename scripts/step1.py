@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from config import PROJECT_ROOT  # noqa: E402  (SHORTS_ROOT 설정을 따름)
 INPUT_DIR = PROJECT_ROOT / "input"
 OUTPUT_DIR = PROJECT_ROOT / "output"
 DEFAULT_INPUT = INPUT_DIR / "원본.mp4"

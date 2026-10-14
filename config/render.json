@@ -1,0 +1,27 @@
+{
+  "_설명": [
+    "영상 렌더링 설정. 1080x1920, 30fps, H.264 + AAC.",
+    "safe_area: 유튜브 쇼츠 화면에서 제목·버튼에 가리지 않도록 비워 둘 여백(픽셀). 자막은 이 안쪽에만 그립니다.",
+    "  오른쪽은 좋아요·댓글 버튼, 아래쪽은 채널명·제목이 덮기 때문에 더 크게 비웁니다.",
+    "segment: 장면 하나를 몇 초 보여 줄지. A·B는 장면 길이를 min~max 로 맞추고, C는 내레이션 길이 + pad.",
+    "preset: 인코딩 속도 (ultrafast 빠름·큰 파일 ~ medium 느림·작은 파일)"
+  ],
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "preset": "veryfast",
+  "crf": 21,
+  "safe_area": {"top": 250, "bottom": 500, "left": 70, "right": 190},
+  "max_total_seconds": 180,
+  "warn_total_seconds": 60,
+  "styles": {
+    "A": {"position": "bottom", "font_size": 76, "text": "#FFFFFF", "box": "#000000B4"},
+    "B": {"position": "top", "font_size": 72, "hook_font_size": 92, "text": "#FFFFFF", "hook_text": "#FFE14D", "box": "#1A1A1AC8"},
+    "C": {"position": "bottom", "font_size": 64, "text": "#FFFFFF", "box": "#000000A0"}
+  },
+  "segment": {
+    "A": {"min": 1.8, "max": 4.0},
+    "B": {"min": 1.8, "max": 3.5},
+    "C": {"pad": 0.5, "min": 1.8, "original_audio_volume": 0.12}
+  }
+}

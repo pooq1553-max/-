@@ -23,7 +23,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from extract_facts import FACTS_FILE, STATUS_OK, save_json_atomic
+from extract_facts import FACTS_FILE, STATUS_HUMAN, STATUS_OK, save_json_atomic
 from step1 import PROJECT_ROOT
 
 SCENES_FILE = PROJECT_ROOT / "output" / "scenes.json"
@@ -191,7 +191,7 @@ def load_json(path, what):
 def verified_values(facts_doc):
     values, unverified, skipped = {}, [], {}
     for field, fact in facts_doc.get("facts", {}).items():
-        if fact.get("status") == STATUS_OK and fact.get("value"):
+        if fact.get("status") in (STATUS_OK, STATUS_HUMAN) and fact.get("value"):
             values[field] = str(fact["value"]).strip()
         else:
             skipped[field] = fact.get("reason") or "확인 필요"

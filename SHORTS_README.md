@@ -76,3 +76,37 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
 - 틀에 숫자를 직접 적으면 실행이 거부되고, 결과에 검증 안 된 숫자·'확인 필요' 값이 있으면 저장하지 않습니다.
 - 셋 중 하나라도 실패하면 아무 파일도 바꾸지 않습니다.
 - 시험해 보기: `--facts tests/fixtures/facts_food.json --scenes tests/fixtures/scenes_6.json`
+
+## 5~7단계: 음성 → 렌더링 → 웹 화면
+
+### 처음 한 번 준비
+```
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python scripts/download_models.py     # 로컬 음성(TTS)·받아쓰기(STT) 모델 약 150MB → models/
+```
+
+### 웹 화면으로 하기 (추천)
+```
+.venv/bin/python scripts/run_web.py             # 브라우저에서 http://127.0.0.1:8000
+```
+원본 영상 올리기 → 설명글 저장 → **제작 시작** → 진행 상황 → 영상 3개 미리보기 → 정보 수정 → 최종 승인.
+- 개발 모드: `scripts/`, `web/` 의 .py 를 고치면 서버가 자동 재시작. `web/index.html` 은 새로고침만 하면 반영.
+- 재시작이 필요한 경우: `pip install` 로 새 패키지를 깔았을 때, `--no-reload` 로 켰을 때 코드를 고쳤을 때.
+- 자동 재시작이나 강제 종료로 제작이 멈추면, 다시 켰을 때 '중단됨'으로 표시되고 **이어서 하기**로 남은 단계부터 다시 합니다.
+
+### 명령으로 하기
+| 단계 | 명령 | 결과 |
+|---|---|---|
+| 음성 | `scripts/voice.py` | `audio/C/cue_XX.wav`, `voice_report.json` (받아쓰기 비교, 차이가 크면 '검토 필요') |
+| 렌더링 | `scripts/render.py` | `output/shorts_A·B·C.mp4`, `frames/review/<형식>/` 확인용 프레임, `output/render_report.json` |
+| 백업 | `scripts/backup_tool.py create` / `list` / `verify 이름` / `restore 이름` | `backup/<날짜>/` (API 키·영상·모델 제외) |
+
+- 음성 엔진과 받아쓰기 엔진은 `config/voice.json` 에서 따로 바꿉니다 (`sherpa_kss` / `supertonic`, `sherpa_zipformer_ko`).
+- 자막 크기·위치·안전 여백(유튜브 버튼에 가리지 않는 영역)은 `config/render.json`.
+- 한 형식 렌더링이 실패해도 다른 형식과 이전에 완성된 파일은 지우지 않습니다. 오류는 `render_report.json` 과 `data/logs/app.log` 에 남습니다.
+- **자동 비교는 발음 품질을 보장하지 못합니다. 최종 음성은 반드시 직접 들어 보세요.**
+
+### 테스트
+```
+.venv/bin/python -m unittest discover -s tests -v
+```

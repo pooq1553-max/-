@@ -34,6 +34,7 @@ API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:gener
 
 STATUS_OK = "설명글에 있음"
 STATUS_REVIEW = "확인 필요"
+STATUS_HUMAN = "사람이 확인함"  # 웹 화면에서 사람이 직접 입력·수정한 값
 
 
 class ExtractError(Exception):
@@ -231,6 +232,18 @@ def main():
 
     fields = read_fields(resolve(args.fields))
     description = read_description(resolve(args.description))
+    if os.environ.get("SHORTS_FAKE_GEMINI") == "1":
+        # 테스트 전용: 실제 Gemini 대신 tests/fake_gemini.py 를 쓴다 (키 필요 없음)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("fake_gemini", Path(__file__).resolve().parent.parent / "tests" / "fake_gemini.py")
+        fake = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fake)
+        print("※ 테스트 모드: 가짜 Gemini 응답을 사용합니다.")
+        model = "테스트용 가짜 Gemini"
+        data = extract(description, fields, fake.ask, model)
+        save_json_atomic(data, resolve(args.output))
+        print(f"저장: {resolve(args.output)}")
+        return 0
     try:
         api_key = get_gemini_api_key()
     except MissingKeyError as e:
