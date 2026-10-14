@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
 
 from helpers import FIX, MODELS_READY, ROOT, make_root, make_video, probe
 

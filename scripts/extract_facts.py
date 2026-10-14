@@ -24,6 +24,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import winsafe
 from config import MissingKeyError, PROJECT_ROOT, get_env_value, get_gemini_api_key
 
 DESCRIPTION_FILE = PROJECT_ROOT / "input" / "description.txt"
@@ -203,7 +204,7 @@ def save_json_atomic(data, path):
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        winsafe.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

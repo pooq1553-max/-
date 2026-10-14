@@ -25,6 +25,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+import winsafe
 from applog import setup_logging
 from extract_facts import save_json_atomic
 from step1 import PROJECT_ROOT, find_font
@@ -203,8 +204,7 @@ def check_video(info, expected, cfg):
 
 def extract_review_frames(video, segments, duration, out_dir):
     """시작·중간·끝 + 자막이 바뀌는 시점의 프레임을 저장하고 한 장으로 모은다."""
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
+    winsafe.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     points = [("시작", 0.1), ("중간", duration / 2), ("끝", max(0.1, duration - 0.15))]
     t = 0.0
@@ -276,7 +276,7 @@ def render_format(fmt, src, src_info, cfg, max_chars):
         frames = extract_review_frames(joined, segments, info["duration"], REVIEW_DIR / fmt)
         tmp_final = OUTPUT_DIR / f".shorts_{fmt}.mp4.tmp"
         shutil.move(str(joined), tmp_final)
-        tmp_final.replace(final)  # 검사를 통과한 뒤에만 기존 파일과 바꿈
+        winsafe.replace(tmp_final, final)  # 검사를 통과한 뒤에만 기존 파일과 바꿈 (재생 중이면 잠깐 기다림)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     warnings = []

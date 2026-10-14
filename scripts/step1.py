@@ -101,7 +101,7 @@ def make_subtitle_png(text, path):
 
     image = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    text_w, text_h = right - left, bottom - top
+    text_w = right - left
     x = (WIDTH - text_w) // 2 - left
     y = int(HEIGHT * 0.72) - top  # 화면 아래쪽 1/4 지점 (쇼츠 버튼에 가리지 않는 높이)
     pad = 28

@@ -20,6 +20,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import winsafe
 from config import CODE_ROOT, PROJECT_ROOT
 
 EXCLUDE_NAMES = {".env"}
@@ -130,7 +131,7 @@ def restore(name, root=PROJECT_ROOT, code_root=CODE_ROOT, with_code=False):
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_name(target.name + ".restore_tmp")
         shutil.copy2(folder / rel, tmp)
-        tmp.replace(target)
+        winsafe.replace(tmp, target)
         restored.append(inner)
     return restored, safety
 

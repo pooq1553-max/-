@@ -21,6 +21,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+import winsafe
 from extract_facts import FACTS_FILE, save_json_atomic
 from make_scripts import verified_values
 from speech_engines import EngineError, make_stt, make_tts
@@ -145,9 +146,8 @@ def generate(script, out_dir, tts):
             items.append({"cue": n, "scene_idx": cue["scene_idx"], "text": cue["narration"],
                           "fields_used": cue.get("fields_used", []), "file": wav.name,
                           "duration": check_audio_file(wav)})
-        if out_dir.exists():
-            shutil.rmtree(out_dir)
-        tmp.rename(out_dir)
+        winsafe.rmtree(out_dir)  # 브라우저에서 재생 중이면 잠깐 기다림
+        winsafe.replace(tmp, out_dir)
         return items
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -224,6 +224,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (VoiceError, EngineError) as e:
+    except (VoiceError, EngineError, winsafe.FileBusyError) as e:
         print(f"\n오류: {e}")
         sys.exit(1)

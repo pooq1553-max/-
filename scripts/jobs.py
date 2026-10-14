@@ -94,7 +94,7 @@ class JobManager:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.lock_file = self.dir / "active.lock"
         self.steps_factory = steps_factory
-        self.env = {**os.environ, "SHORTS_ROOT": str(self.root), "PYTHONUNBUFFERED": "1", **(env or {})}
+        self.env = {**os.environ, "SHORTS_ROOT": str(self.root), "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", **(env or {})}
         self._lock = threading.Lock()
         self._threads = {}
         self.recover()

@@ -13,12 +13,13 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import winsafe  # noqa: E402
 from applog import setup_logging  # noqa: E402
 from backup_tool import create as create_backup  # noqa: E402
 from config import PROJECT_ROOT  # noqa: E402
@@ -144,9 +145,9 @@ def create_app(root=None, manager=None):
             if probe.returncode != 0 or not info.get("streams"):
                 raise HTTPException(400, "영상으로 읽을 수 없는 파일입니다.")
             for old in (root / "input").glob("원본.*"):
-                old.unlink()
+                winsafe.unlink(old)
             final = root / "input" / f"원본{ext}"
-            tmp.replace(final)
+            winsafe.replace(tmp, final)
         finally:
             tmp.unlink(missing_ok=True)
         stream = info["streams"][0]
@@ -164,7 +165,7 @@ def create_app(root=None, manager=None):
             raise HTTPException(400, f"설명글이 너무 깁니다 (최대 {MAX_DESCRIPTION}자).")
         tmp = paths["description"].with_suffix(".tmp")
         tmp.write_text(text + "\n", encoding="utf-8")
-        tmp.replace(paths["description"])
+        winsafe.replace(tmp, paths["description"])
         return {"saved": True, "chars": len(text)}
 
     # ---------- 제미나이 키 (화면에 키를 다시 보여 주지 않음) ----------
@@ -181,7 +182,7 @@ def create_app(root=None, manager=None):
         lines.insert(0, f"GEMINI_API_KEY={key}")
         tmp = paths["env"].with_name(".env.tmp")
         tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        tmp.replace(paths["env"])
+        winsafe.replace(tmp, paths["env"])
         log.info("제미나이 키 저장 (글자 수 %d)", len(key))
         return {"saved": True, "length": len(key), "looks_normal": key.startswith("AIza") and len(key) == 39}
 

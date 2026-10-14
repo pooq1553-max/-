@@ -18,6 +18,7 @@ from pathlib import Path
 import cv2
 from scenedetect import ContentDetector, detect
 
+import winsafe
 from scene_analyzers import ANALYZERS
 from step1 import DEFAULT_INPUT, PROJECT_ROOT, StepError, open_folder
 
@@ -61,7 +62,7 @@ def make_contact_sheet(scenes, path):
     thumbs = []
     for scene in scenes:
         for photo in scene["photos"]:
-            img = cv2.imread(str(FRAMES_DIR / photo))
+            img = winsafe.imread(FRAMES_DIR / photo)
             img = cv2.resize(img, (240, round(img.shape[0] * 240 / img.shape[1])))
             label = f"#{scene['idx']} {mmss(scene['start'])}"
             if scene["excluded"]:
@@ -79,7 +80,55 @@ def make_contact_sheet(scenes, path):
         row = thumbs[i:i + per_row]
         row += [blank] * (per_row - len(row))
         rows.append(cv2.hconcat(row))
-    cv2.imwrite(str(path), cv2.vconcat(rows), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    winsafe.imwrite(path, cv2.vconcat(rows), [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+
+def analyze_video(video_path, video, analyzer, threshold):
+    """장면을 나누고, 장면마다 대표 사진 2장과 특징을 계산한다."""
+    print("장면 나누는 중… (영상 길이에 따라 시간이 걸려요)")
+    ranges = find_scenes(video_path, threshold, video)
+    print(f"장면 {len(ranges)}개 발견. 장면마다 사진 뽑고 특징 계산 중…")
+
+    scenes = []
+    for idx, (first, last) in enumerate(ranges, start=1):
+        length = max(1, last - first)
+        photos = []
+        for tag, pos in (("a", 1 / 3), ("b", 2 / 3)):
+            frame = video.frame_at(first + int(length * pos))
+            if frame is None:
+                raise StepError(f"{idx}번 장면의 사진을 읽지 못했습니다.")
+            name = f"scene_{idx:03d}_{tag}.jpg"
+            winsafe.imwrite(FRAMES_DIR / name, frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            photos.append(name)
+
+        samples, motion_pairs = [], []
+        for k in range(SAMPLE_COUNT):
+            pos = first + int(length * (k + 0.5) / SAMPLE_COUNT)
+            a = video.frame_at(pos)
+            b = video.frame_at(min(pos + 1, last - 1))
+            if a is None:
+                continue
+            samples.append(a)
+            if b is not None and pos + 1 < last:
+                motion_pairs.append((a, b))
+
+        start, end = first / video.fps, last / video.fps
+        info = {"idx": idx, "start": round(start, 2), "end": round(end, 2),
+                "duration": round(end - start, 2), "photos": photos}
+        result = analyzer.analyze({**info, "samples": samples, "motion_pairs": motion_pairs})
+        scenes.append({
+            "idx": idx,
+            "start": info["start"],
+            "end": info["end"],
+            "duration": info["duration"],
+            "shot_type": result["shot_type"],
+            "description": result["description"],
+            "features": result["features"],
+            "excluded": result["excluded"],
+            "exclude_reason": result["exclude_reason"],
+            "photos": photos,
+        })
+    return scenes
 
 
 def main():
@@ -103,56 +152,16 @@ def main():
     FRAMES_DIR.mkdir(exist_ok=True)
     SCENES_JSON.parent.mkdir(exist_ok=True)
     for old in list(FRAMES_DIR.glob("scene_*.jpg")) + [FRAMES_DIR / "한눈에보기.jpg"]:
-        old.unlink(missing_ok=True)  # 이전 실행의 사진이 섞이지 않게
+        winsafe.unlink(old)  # 이전 실행의 사진이 섞이지 않게
 
     analyzer = ANALYZERS[args.analyzer]()
-    video = Video(src)
-    try:
-        print("장면 나누는 중… (영상 길이에 따라 시간이 걸려요)")
-        ranges = find_scenes(src, args.threshold, video)
-        print(f"장면 {len(ranges)}개 발견. 장면마다 사진 뽑고 특징 계산 중…")
-
-        scenes = []
-        for idx, (first, last) in enumerate(ranges, start=1):
-            length = max(1, last - first)
-            photos = []
-            for tag, pos in (("a", 1 / 3), ("b", 2 / 3)):
-                frame = video.frame_at(first + int(length * pos))
-                if frame is None:
-                    raise StepError(f"{idx}번 장면의 사진을 읽지 못했습니다.")
-                name = f"scene_{idx:03d}_{tag}.jpg"
-                cv2.imwrite(str(FRAMES_DIR / name), frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                photos.append(name)
-
-            samples, motion_pairs = [], []
-            for k in range(SAMPLE_COUNT):
-                pos = first + int(length * (k + 0.5) / SAMPLE_COUNT)
-                a = video.frame_at(pos)
-                b = video.frame_at(min(pos + 1, last - 1))
-                if a is None:
-                    continue
-                samples.append(a)
-                if b is not None and pos + 1 < last:
-                    motion_pairs.append((a, b))
-
-            start, end = first / video.fps, last / video.fps
-            info = {"idx": idx, "start": round(start, 2), "end": round(end, 2),
-                    "duration": round(end - start, 2), "photos": photos}
-            result = analyzer.analyze({**info, "samples": samples, "motion_pairs": motion_pairs})
-            scenes.append({
-                "idx": idx,
-                "start": info["start"],
-                "end": info["end"],
-                "duration": info["duration"],
-                "shot_type": result["shot_type"],
-                "description": result["description"],
-                "features": result["features"],
-                "excluded": result["excluded"],
-                "exclude_reason": result["exclude_reason"],
-                "photos": photos,
-            })
-    finally:
-        video.close()
+    # 윈도우의 OpenCV 는 한글 파일 이름(원본.mp4)을 못 열어서 영어 이름의 연결 파일로 연다
+    with winsafe.ascii_path(src, FRAMES_DIR) as video_path:
+        video = Video(video_path)
+        try:
+            scenes = analyze_video(video_path, video, analyzer, args.threshold)
+        finally:
+            video.close()
 
     data = {
         "source": src.name,

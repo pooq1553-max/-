@@ -1,5 +1,4 @@
 """음성(TTS)·받아쓰기(STT) 테스트."""
-import json
 import tempfile
 import unittest
 from pathlib import Path
