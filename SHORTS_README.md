@@ -49,3 +49,15 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
   `features`(sharpness 선명도, brightness 밝기, saturation 채도, warmth 따뜻함, motion 움직임), `excluded`(제외 여부)와 이유
 - 장면이 너무 잘게/크게 나뉘면 `--threshold` 숫자를 바꿉니다 (낮을수록 잘게, 기본 27).
 - 장면을 읽는 방식은 `scripts/scene_analyzers.py`에 있습니다. 나중에 AI 분석기를 여기에 추가하고 `--analyzer 이름`으로 고릅니다.
+
+## 3단계 실행: 설명글에서 정보 뽑기 → data/facts.json
+
+1. `input/description.txt` 에 영상 설명글을 붙여 넣고 저장합니다.
+2. 뽑을 항목은 `config/fields.txt` 에 한 줄에 하나씩 적습니다 (지금은 음식 예시: 가게명, 메뉴명, 가격, 지역, 특징).
+3. 실행: `.venv/bin/python scripts/extract_facts.py` (다른 항목 파일: `--fields config/여행.txt`)
+
+- 항목마다 `value`, `evidence`(설명글에서 그대로 옮긴 근거), `status`, `reason` 이 저장됩니다.
+- 근거가 설명글에 글자 그대로 없거나, 값이 근거 안에 없으면 `value`를 비우고 `status: "확인 필요"`로 둡니다.
+- Gemini 호출이 실패하면 기존 `data/facts.json`은 그대로 둡니다.
+- **"설명글에 있음"은 설명글에 그렇게 적혀 있다는 뜻이지, 사실이라는 뜻이 아닙니다.**
+- 테스트: `.venv/bin/python -m unittest discover -s tests -v`

@@ -26,6 +26,11 @@ def _read_env_file(path=ENV_PATH):
     return values
 
 
+def get_env_value(name):
+    """키가 아닌 일반 설정값(예: GEMINI_MODEL)을 .env 에서 읽는다. 없으면 빈 문자열."""
+    return _read_env_file().get(name, "")
+
+
 def get_gemini_api_key():
     """GEMINI_API_KEY 를 .env 에서 읽어 돌려준다. 없으면 키 없이 설명만 담은 오류를 낸다."""
     if not ENV_PATH.is_file():
