@@ -128,6 +128,23 @@ class WebTest(unittest.TestCase):
         r = self.client.post("/api/approve", json={"format": "A", "checked_video": True, "checked_facts": True})
         self.assertEqual(r.status_code, 400)
 
+    def test_key_saved_to_env_but_never_shown(self):
+        (self.root / ".env").write_text("GEMINI_API_KEY=여기에키를붙여넣기\nGEMINI_MODEL=gemini-test\n", encoding="utf-8")
+        self.assertFalse(self.client.get("/api/state").json()["key"]["set"])
+        key = "AIza" + "x" * 35
+        r = self.client.post("/api/key", json={"key": "  " + key + " "})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(key, r.text)
+        self.assertTrue(r.json()["looks_normal"])
+        env = (self.root / ".env").read_text(encoding="utf-8")
+        self.assertIn(f"GEMINI_API_KEY={key}\n", env)
+        self.assertIn("GEMINI_MODEL=gemini-test", env)
+        self.assertEqual(env.count("GEMINI_API_KEY"), 1)
+        state = self.client.get("/api/state")
+        self.assertNotIn(key, state.text)
+        self.assertEqual(state.json()["key"], {"set": True, "length": 39})
+        self.assertEqual(self.client.post("/api/key", json={"key": "짧은 키"}).status_code, 400)
+
     def test_state_lists_three_formats(self):
         s = self.client.get("/api/state").json()
         self.assertEqual(sorted(s["results"]), ["A", "B", "C"])

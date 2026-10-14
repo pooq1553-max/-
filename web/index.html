@@ -21,7 +21,7 @@
   button { font:inherit; padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--text); cursor:pointer; }
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
   button:disabled { opacity:.5; cursor:not-allowed; }
-  textarea, input[type=text] { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
+  textarea, input[type=text], input[type=password] { width:100%; font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); }
   textarea { min-height:120px; resize:vertical; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .steps { list-style:none; padding:0; margin:8px 0 0; }
@@ -47,6 +47,13 @@
 <body>
 <main>
   <h1>쇼츠 자동화</h1>
+
+  <section>
+    <h2>제미나이 키</h2>
+    <p class="muted">aistudio.google.com/apikey 에서 복사한 키를 붙여 넣으세요. 저장한 키는 화면에 다시 보여 주지 않습니다.</p>
+    <div class="row"><input type="password" id="key" autocomplete="off" placeholder="AIza로 시작하는 키" style="max-width:420px">
+      <button id="keyBtn">키 저장</button><span id="keyInfo" class="muted"></span></div>
+  </section>
 
   <section>
     <h2>1. 원본 영상</h2>
@@ -110,6 +117,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&l
 
 function render() {
   const s = state; if (!s) return;
+  $("keyInfo").textContent = s.key && s.key.set ? `키가 들어 있음, 글자 수 ${s.key.length}개` : "키 없음 (정보 뽑기 단계에 필요)";
   $("videoInfo").textContent = s.video ? `올린 영상: ${s.video.name} (${(s.video.size/1048576).toFixed(1)}MB)` : "아직 없음";
   if (!descDirty && document.activeElement !== $("desc")) $("desc").value = s.description || "";
   const job = s.job, running = job && ["queued","running"].includes(job.status);
@@ -175,9 +183,15 @@ async function refresh() {
 async function guard(fn) { if (busy) return; busy = true; render();
   try { await fn(); } catch (e) { toast(e.message); } finally { busy = false; await refresh(); } }
 
+$("keyBtn").onclick = () => guard(async () => {
+  const r = await api("/api/key", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({key:$("key").value})});
+  $("key").value = "";
+  toast(`키를 저장했습니다 (글자 수 ${r.length}개)` + (r.looks_normal ? "" : " — 보통 키는 AIza로 시작하고 39자입니다. 확인해 보세요."));
+});
 $("uploadBtn").onclick = () => guard(async () => {
   const f = $("file").files[0]; if (!f) throw new Error("영상 파일을 고르세요.");
   const fd = new FormData(); fd.append("file", f);
+  $("keyInfo").textContent = s.key && s.key.set ? `키가 들어 있음, 글자 수 ${s.key.length}개` : "키 없음 (정보 뽑기 단계에 필요)";
   $("videoInfo").textContent = "올리는 중…";
   const r = await api("/api/upload", {method:"POST", body:fd});
   toast(`올림: ${r.name} (${r.duration}초, ${r.width}×${r.height})`);

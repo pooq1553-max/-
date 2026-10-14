@@ -48,6 +48,10 @@ class Approval(BaseModel):
     checked_video: bool = False
 
 
+class KeyInput(BaseModel):
+    key: str
+
+
 class StartRequest(BaseModel):
     from_step: str | None = None
 
@@ -84,7 +88,18 @@ def create_app(root=None, manager=None):
         "approvals": root / "data" / "approvals.json",
         "render": root / "output" / "render_report.json",
         "voice": root / "audio" / "C" / "voice_report.json",
+        "env": root / ".env",
     }
+
+    def read_key():
+        if not paths["env"].is_file():
+            return ""
+        for line in paths["env"].read_text(encoding="utf-8-sig").splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == "GEMINI_API_KEY":
+                value = value.strip().strip('"').strip("'")
+                return "" if value == "여기에키를붙여넣기" else value
+        return ""
 
     def input_video():
         found = [p for p in (root / "input").glob("원본.*") if p.suffix.lower() in VIDEO_EXTS]
@@ -151,6 +166,24 @@ def create_app(root=None, manager=None):
         tmp.write_text(text + "\n", encoding="utf-8")
         tmp.replace(paths["description"])
         return {"saved": True, "chars": len(text)}
+
+    # ---------- 제미나이 키 (화면에 키를 다시 보여 주지 않음) ----------
+
+    @app.post("/api/key")
+    def save_key(body: KeyInput):
+        key = body.key.strip()
+        if not key:
+            raise HTTPException(400, "키가 비어 있습니다.")
+        if any(c.isspace() for c in key) or not key.isascii() or not 20 <= len(key) <= 200:
+            raise HTTPException(400, "키 모양이 이상합니다. AI Studio 에서 복사 버튼으로 다시 복사해 붙여 넣으세요.")
+        lines = paths["env"].read_text(encoding="utf-8-sig").splitlines() if paths["env"].is_file() else []
+        lines = [line for line in lines if line.partition("=")[0].strip() != "GEMINI_API_KEY"]
+        lines.insert(0, f"GEMINI_API_KEY={key}")
+        tmp = paths["env"].with_name(".env.tmp")
+        tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        tmp.replace(paths["env"])
+        log.info("제미나이 키 저장 (글자 수 %d)", len(key))
+        return {"saved": True, "length": len(key), "looks_normal": key.startswith("AIza") and len(key) == 39}
 
     # ---------- 제작 ----------
 
@@ -276,7 +309,9 @@ def create_app(root=None, manager=None):
             fields = read_fields(paths["fields"])
         except Exception:
             fields = []
+        key = read_key()
         return {
+            "key": {"set": bool(key), "length": len(key)},
             "video": {"name": video.name, "size": video.stat().st_size} if video else None,
             "description": description,
             "job": jobs.active() or jobs.latest(),
