@@ -1,0 +1,9 @@
+{"scene_count": 7, "scenes": [
+  {"idx": 1, "start": 0.0, "end": 3.0, "excluded": false},
+  {"idx": 2, "start": 3.0, "end": 6.5, "excluded": false},
+  {"idx": 3, "start": 6.5, "end": 7.0, "excluded": true},
+  {"idx": 4, "start": 7.0, "end": 11.0, "excluded": false},
+  {"idx": 5, "start": 11.0, "end": 15.0, "excluded": false},
+  {"idx": 6, "start": 15.0, "end": 19.5, "excluded": false},
+  {"idx": 7, "start": 19.5, "end": 24.0, "excluded": false}
+]}

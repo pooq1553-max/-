@@ -61,3 +61,18 @@ audio/ (소리) ─┼─▶ scripts/ (처리) ─▶ frames/ (임시) ─▶ ou
 - Gemini 호출이 실패하면 기존 `data/facts.json`은 그대로 둡니다.
 - **"설명글에 있음"은 설명글에 그렇게 적혀 있다는 뜻이지, 사실이라는 뜻이 아닙니다.**
 - 테스트: `.venv/bin/python -m unittest discover -s tests -v`
+
+## 4단계 실행: 제목·자막·내레이션 대본 (A/B/C형)
+
+실행: `.venv/bin/python scripts/make_scripts.py` (입력: `output/scenes.json`, `data/facts.json`)
+
+| 형식 | 파일 | 내용 |
+|---|---|---|
+| A형 | `output/script_A.json` / `.txt` | 짧은 자막 중심, 장면 보여 주기 (음성 없음) |
+| B형 | `output/script_B.json` / `.txt` | 다른 훅(질문으로 시작 → 답), 다른 자막 구성 (음성 없음) |
+| C형 | `output/script_C.json` / `.txt` | 내레이션 + 자막 해설 (장면보다 긴 내레이션은 ⚠ 표시) |
+
+- 문장은 `config/templates.json`의 문장 틀 + '설명글에 있음' 값으로만 만듭니다 (AI 사용 안 함).
+- 틀에 숫자를 직접 적으면 실행이 거부되고, 결과에 검증 안 된 숫자·'확인 필요' 값이 있으면 저장하지 않습니다.
+- 셋 중 하나라도 실패하면 아무 파일도 바꾸지 않습니다.
+- 시험해 보기: `--facts tests/fixtures/facts_food.json --scenes tests/fixtures/scenes_6.json`
