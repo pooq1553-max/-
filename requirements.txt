@@ -1,0 +1,10 @@
+# 쇼츠 자동화에 필요한 부품. 윈도우·맥·리눅스 공통 (운영체제별 부품은 pip 가 알아서 고름)
+pillow==12.3.0
+numpy==2.5.4
+opencv-python==5.0.0.93
+scenedetect==0.7.2
+sherpa-onnx==1.13.8
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1

@@ -1,3 +1,24 @@
+# API 키가 든 파일은 절대 git에 올리지 않음 (.env.example 은 예시라 올림)
+.env
+.env.*
+!.env.example
+
+# 가상환경
+.venv/
+
+# 원본·결과 영상, 데이터, 대용량 모델, 백업
+input/
+output/
+data/
+models/
+backup/
+
+# 파이썬 캐시
 __pycache__/
 *.pyc
+
+# 기존 규칙: 주식 리포트 결과, 쇼츠 작업용 음성·임시 프레임
 reports/
+audio/*
+frames/*
+!*/.gitkeep
