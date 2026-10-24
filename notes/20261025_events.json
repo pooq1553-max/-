@@ -1,0 +1,113 @@
+[
+  {
+    "date": "2026-10-19",
+    "h": "지난주 급락 뒤 기술주 반등, 나스닥 +1.1%",
+    "b": "S&P500이 6월 이후 최악의 주를 보낸 뒤 기술주가 반등해 나스닥 **+1.11%**, 반도체지수 +1.61%. S&P +0.41%, 다우는 -0.07%로 보합.",
+    "src": [
+      {
+        "t": "CNBC 10/19",
+        "u": "https://www.cnbc.com/2026/10/18/stock-market-today-live-updates.html"
+      },
+      {
+        "t": "TheStreet 10/19",
+        "u": "https://www.thestreet.com/stock-market-today/stock-market-today-oct-19-2026-nasdaq-futures-climb-as-tech-rebound-from-sell-off"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-20",
+    "h": "유가 내리며 다우 +1%, 장후 넷플릭스는 가이던스 실망",
+    "b": "중동 외교 기대에 유가가 내려 다우 **+1.02%**, 러셀2000 +1.65%. 장 마감 후 넷플릭스는 3분기 이익은 예상을 넘었지만 4분기 매출 전망이 낮아 다음 날 장중 -7%까지 밀렸습니다. 스페이스X는 분기 순이익 44억 달러로 예상(18.8억 달러)을 크게 넘었습니다.",
+    "src": [
+      {
+        "t": "Yahoo Finance 10/20",
+        "u": "https://finance.yahoo.com/markets/stocks/articles/markets-news-oct-20-2026-103252254.html"
+      },
+      {
+        "t": "24/7 Wall St. (넷플릭스)",
+        "u": "https://247wallst.com/investing/2026/10/21/netflix-sinks-7-as-soft-q4-outlook-sparks-wave-of-price-target-cuts-spotify-slips-disney-holds-steady/"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-21",
+    "h": "트럼프 \"이란과 협상 안 한다, 그래도 곧 결론\" · 스페이스X +7%",
+    "b": "트럼프 대통령은 이란과 협상 중이라는 보도를 부인하면서도 분쟁이 **\"꽤 곧(fairly soon)\"** 결론 날 것이라고 했고, 11/3 중간선거 전에는 공격하지 않겠다고 했습니다. WTI는 하루 **-4.56%**. 스페이스X가 3분기 매출 161% 증가와 테슬라와의 합병 논의 위원회 구성 소식에 7% 오르며 나스닥 +1.05%. 장 마감 후 메타·테슬라 실적.",
+    "src": [
+      {
+        "t": "Yahoo Finance 10/21",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-wednesday-october-21-dow-sp-500-nasdaq-100000105.html"
+      },
+      {
+        "t": "Outlook India (트럼프)",
+        "u": "https://www.outlookindia.com/international/no-talks-but-an-end-very-soon-trumps-iran-war-claims-face-tehrans-account"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-22",
+    "h": "메타 설비투자 상향에 AI 거품론 재점화: 나스닥 -2.6%, 6월 이후 최악의 하루",
+    "b": "메타가 실적은 좋았지만 설비투자 전망 하단을 50억 달러 올리자(1,350억~1,450억 달러) 주가가 **-7%**, 램리서치는 사상 최대 매출에도 다음 분기 가이던스 실망으로 **-11.8%**. 반도체지수 **-6.72%**, 나스닥 -2.60%, S&P -1.21%. 돈은 방어주로 이동했고 10년물은 하루 -19bp 내렸습니다. 브렌트는 113달러를 넘었습니다.",
+    "src": [
+      {
+        "t": "BBN Times 10/22",
+        "u": "https://www.bbntimes.com/technology/nasdaq-drops-to-26-008-86-as-lam-research-sinks-11-8-and-meta-falls-7-on-ai-spending-fears"
+      },
+      {
+        "t": "Chartmill 10/22",
+        "u": "https://www.chartmill.com/news/DOW/Chartmill-56715-stock-market-today-meta-capex-ai-selloff-nasdaq-defensive-rotation-lockheed-spotify-2026-10-22"
+      },
+      {
+        "t": "Forex.com (메타)",
+        "u": "https://www.forex.com/en-sg/news-and-analysis/nasdaq-100-slides-as-meta-posts-strong-results-and-drops-6pct/"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-23",
+    "h": "트럼프 이란 재공격 시사에 브렌트 116달러, 다우 -650p",
+    "b": "트럼프 대통령이 이란을 다시 공격할 가능성을 언급하자 브렌트가 **116.72달러**로 6개월 만의 최고, WTI +3.8%로 103달러. 이란은 공격받으면 걸프 해저케이블과 군사기지를 노리겠다고 맞섰습니다. 아멕스가 'AI 대비'를 이유로 인력 5% 감축을 발표하며 3% 넘게 빠졌고 다우 **-1.23%**, S&P -0.52%.",
+    "src": [
+      {
+        "t": "서울경제 10/24",
+        "u": "https://en.sedaily.com/finance/2026/10/24/trump-floats-new-strike-on-iran-as-oil-hits-6-month-high"
+      },
+      {
+        "t": "Yahoo Finance 10/23",
+        "u": "https://finance.yahoo.com/markets/live/stock-market-today-friday-october-23-dow-sp-500-nasdaq-tesla-meta-093000521.html"
+      },
+      {
+        "t": "The Hill (브렌트 116달러)",
+        "u": "https://thehill.com/policy/energy-environment/6168144-oil-prices-iran-war-strait-of-hormuz/"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-20",
+    "mkt": "KR",
+    "h": "코스피 -3.73%, 6개월 만의 최저",
+    "b": "월요일 반등(+1.76%)을 하루 만에 지우고 6개월 만의 저점으로 밀렸습니다.",
+    "src": [
+      {
+        "t": "IBTimes",
+        "u": "https://www.ibtimes.com.au/south-korean-stocks-rebound-samsung-sk-hynix-1877094"
+      }
+    ]
+  },
+  {
+    "date": "2026-10-21",
+    "mkt": "KR",
+    "h": "외국인 복귀에 코스피 +3.29%, 매수 사이드카",
+    "b": "외국인이 6,650억 순매수로 돌아서며 삼성전자 +5.67%, SK하이닉스 +5.81%. 슈퍼마이크로 호실적이 계기로 꼽혔고 매수 사이드카까지 발동됐습니다.",
+    "src": [
+      {
+        "t": "Herald Business",
+        "u": "https://biz.heraldcorp.com/article/10910347"
+      },
+      {
+        "t": "Bloomingbit",
+        "u": "https://en.bloomingbit.io/feed/news/122629"
+      }
+    ]
+  }
+]
