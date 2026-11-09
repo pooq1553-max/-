@@ -1,4 +1,4 @@
-<title>민준이의 선택</title>
+<title>헌동이의 선택</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=Gowun+Dodum&display=swap">
@@ -64,7 +64,7 @@ body {
 </style>
 
 <div class="top">
-  <h1>민준이의 <span>선택</span></h1>
+  <h1>헌동이의 <span>선택</span></h1>
   <div class="stats" aria-label="현재 상태">
     <span>통장 <b id="sMoney">0</b>만</span>
     <span>자기관리 <b id="sCare">0</b></span>
@@ -145,7 +145,7 @@ function portrait(who, mood) {
    fx: 상태 변화  m=통장(만원) c=자기관리 h=공감력 a=호감도 */
 const S = {
   start: { bg: 'room', ch: '프롤로그', lines: [
-    [null, '김민준, 29살. 중소기업 3년차. 월급 280, 월세 50.'],
+    [null, '김헌동, 29살. 중소기업 3년차. 월급 280, 월세 50.'],
     [null, '오늘도 퇴근하고 원룸에 들어와 불을 켠다.'],
     ['나', '…금요일이다. 뭐 하지.'],
   ], choices: [
@@ -163,7 +163,7 @@ const S = {
     [null, '샤워하고 나오니 동현이에게서 카톡이 와 있다.'],
   ], next: 'pub' },
   pub: { bg: 'pub', ch: '1장 · 갈림길', who: '동현', lines: [
-    ['동현', '야 민준아. 너 언제까지 혼자 살 거냐.'],
+    ['동현', '야 헌동아. 너 언제까지 혼자 살 거냐.'],
     ['나', '혼자가 편해. 돈도 없고.'],
     ['동현', '내 와이프 회사 동료 있는데 소개팅 할래? 착하고 웃긴 사람이야.'],
     ['동현', '아니면 우리 회사 사람들 다니는 언어교환 모임도 있어. 외국인 친구들 많아.'],
@@ -204,7 +204,7 @@ const S = {
   ], next: 'solo1' },
   sy2: { bg: 'street', who: '서윤', lines: [
     [null, '연애 석 달째. 오늘은 100일이다.'],
-    ['서윤', '(전화) 민준아 진짜 미안해… 갑자기 야근이 잡혀서 오늘 못 갈 것 같아.', 'sad'],
+    ['서윤', '(전화) 헌동아 진짜 미안해… 갑자기 야근이 잡혀서 오늘 못 갈 것 같아.', 'sad'],
   ], choices: [
     { t: '"괜찮아. 대신 끝나면 회사 앞으로 떡볶이 사 갈게."', fx: { a: 2, h: 1, m: -2 }, go: 'sy3' },
     { t: '"100일인데? 나보다 회사가 중요해?" 문자 20통.', fx: { a: -2 }, go: 'sy3' },
@@ -239,7 +239,7 @@ const S = {
   ]},
   ln2: { bg: 'hanoi', ch: '3장 · 뗏(설날)', who: '린', lines: [
     [null, '사귄 지 1년. 베트남 설날 "뗏"이 다가온다.'],
-    ['린', '민준, 이번 뗏에 우리 가족 만나러 같이 갈래? 엄마가 꼭 보고 싶대.', 'love'],
+    ['린', '헌동, 이번 뗏에 우리 가족 만나러 같이 갈래? 엄마가 꼭 보고 싶대.', 'love'],
   ], choices: [
     { t: '연차 쓰고 같이 간다. 비행기에서 베트남어 인사말 연습.', fx: { a: 2, h: 1, m: -80 }, go: 'ln3' },
     { t: '"회사 때문에 안 돼." 영상통화도 귀찮아서 대충.', fx: { a: -2 }, go: 'ln3' },
@@ -268,11 +268,11 @@ const ENDS = {
   sy_bad:  { tag: 'ENDING 2-A', title: '파국 엔딩', bg: 'street', who: '서윤', mood: 'sad',
              text: '말 대신 한숨이, 대화 대신 카톡 읽씹이 늘었다. 결국 각자의 짐을 쌌다. 대출은 반으로 나눴지만 상처는 나눌 수가 없었다. 누가 빼앗아 간 게 아니라 같이 무너뜨린 거였다.' },
   sy_good: { tag: 'ENDING 2-B', title: '같이 늙어가는 엔딩', bg: 'home', who: '서윤', mood: 'love',
-             text: '설거지 당번은 여전히 민준. 대출은 아직 20년 남았지만, 퇴근길에 "오늘 뭐 먹지?" 물어볼 사람이 있다. 그거면 충분했다.' },
+             text: '설거지 당번은 여전히 헌동. 대출은 아직 20년 남았지만, 퇴근길에 "오늘 뭐 먹지?" 물어볼 사람이 있다. 그거면 충분했다.' },
   ln_bad:  { tag: 'ENDING 3-A', title: '말이 끊긴 엔딩', bg: 'street', who: '린', mood: 'sad',
-             text: '린은 한국어를 3년 배웠는데 민준은 린의 마음을 하루도 배우지 않았다. 린은 하노이로 돌아갔다. 같은 언어로 말해도 통하지 않는다는 걸 너무 늦게 알았다.' },
+             text: '린은 한국어를 3년 배웠는데 헌동은 린의 마음을 하루도 배우지 않았다. 린은 하노이로 돌아갔다. 같은 언어로 말해도 통하지 않는다는 걸 너무 늦게 알았다.' },
   ln_good: { tag: 'ENDING 3-B', title: '두 나라 한 가족 엔딩', bg: 'hanoi', who: '린', mood: 'love',
-             text: '린은 통번역사가 됐고, 민준의 베트남어는 장모님과 농담할 정도가 됐다. 추석엔 전, 뗏엔 반쯩. 식탁이 두 배로 넓어졌다.' },
+             text: '린은 통번역사가 됐고, 헌동의 베트남어는 장모님과 농담할 정도가 됐다. 추석엔 전, 뗏엔 반쯩. 식탁이 두 배로 넓어졌다.' },
 };
 const END_ORDER = ['solo', 'sy_bad', 'sy_good', 'ln_bad', 'ln_good'];
 
@@ -303,7 +303,7 @@ function line() {
   const [who, txt, mood] = scene.lines[idx];
   const speaker = who && who !== '나' ? who : null;
   if (speaker) show(speaker, mood); else if (idx === 0) show(scene.who, scene.mood);
-  nameEl.hidden = !who; nameEl.textContent = who === '나' ? '민준' : who || '';
+  nameEl.hidden = !who; nameEl.textContent = who === '나' ? '헌동' : who || '';
   nameEl.style.background = who === '나' ? 'var(--gold)' : who === '린' ? 'var(--mint)' : 'var(--pink)';
   textEl.className = who ? '' : 'narr';
   type(txt);
