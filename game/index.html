@@ -1,0 +1,258 @@
+<title>별똥별 피하기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&family=Gowun+Dodum&display=swap">
+<style>
+/* 한 화면 게임: 위쪽 점수판, 가운데 캔버스, 아래 조작 안내. 밤하늘 단일 테마. */
+:root {
+  --sky: #0d1330;
+  --sky-2: #1c2457;
+  --ink: #eef0ff;
+  --muted: #9aa3d6;
+  --star: #ffd45c;
+  --meteor: #ff7a59;
+  --font-display: "Jua", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--sky); color: var(--ink); font-family: var(--font-body);
+  display: flex; flex-direction: column; overflow: hidden;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px; box-sizing: border-box; gap: 10px;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; max-width: 520px; width: 100%; margin: 0 auto; }
+h1 { font-family: var(--font-display); font-weight: 400; font-size: 1.6rem; margin: 0; letter-spacing: .02em; }
+h1 span { color: var(--star); }
+.stats { display: flex; gap: 14px; font-variant-numeric: tabular-nums; font-size: .95rem; color: var(--muted); }
+.stats b { color: var(--ink); font-weight: 400; font-family: var(--font-display); font-size: 1.15rem; }
+#wrap { position: relative; flex: 1; min-height: 0; max-width: 520px; width: 100%; margin: 0 auto; border-radius: 14px; overflow: hidden; background: linear-gradient(var(--sky-2), var(--sky)); }
+canvas { display: block; width: 100%; height: 100%; }
+#overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px; background: rgba(13,19,48,.62); }
+#overlay h2 { font-family: var(--font-display); font-weight: 400; font-size: 2.2rem; margin: 0; text-wrap: balance; }
+#overlay p { margin: 0; color: var(--muted); line-height: 1.6; max-width: 30ch; }
+#overlay .big { color: var(--star); font-family: var(--font-display); font-size: 1.4rem; }
+button { font-family: var(--font-display); font-size: 1.2rem; padding: 12px 28px; border: 0; border-radius: 999px; background: var(--star); color: var(--sky); cursor: pointer; }
+button:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+footer { text-align: center; color: var(--muted); font-size: .85rem; }
+</style>
+
+<header>
+  <h1>별똥별 <span>피하기</span></h1>
+  <div class="stats">
+    <span>점수 <b id="score">0</b></span>
+    <span>최고 <b id="best">0</b></span>
+    <span id="lives" aria-label="남은 목숨">♥♥♥</span>
+  </div>
+</header>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <div id="overlay">
+    <h2 id="ovTitle">별똥별 피하기</h2>
+    <p id="ovText">떨어지는 <span style="color:var(--meteor)">별똥별</span>은 피하고 <span style="color:var(--star)">노란 별</span>은 모으세요. 오래 버틸수록 빨라져요.</p>
+    <button id="start">시작하기</button>
+  </div>
+</div>
+<footer>← → 또는 A·D 키 · 폰은 손가락을 대고 좌우로 끌어서 이동 · P 일시정지</footer>
+
+<script>
+(() => {
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+  const wrap = document.getElementById('wrap');
+  const $score = document.getElementById('score'), $best = document.getElementById('best'), $lives = document.getElementById('lives');
+  const ov = document.getElementById('overlay'), ovTitle = document.getElementById('ovTitle'), ovText = document.getElementById('ovText'), btn = document.getElementById('start');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0, dpr = 1;
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = wrap.clientWidth; H = wrap.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (player) player.y = H - 46;
+  }
+
+  let best = 0;
+  try { best = +localStorage.getItem('meteor-best') || 0; } catch (e) {}
+  $best.textContent = best;
+
+  const bg = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.4 + .3, s: Math.random() * .3 + .05 }));
+  let player, things, particles, score, lives, t, spawnT, starT, running = false, paused = false, invuln = 0, last = 0;
+  const keys = { l: false, r: false };
+  let touchX = null;
+
+  function reset() {
+    player = { x: W / 2, y: H - 46, r: 16, vx: 0 };
+    things = []; particles = []; score = 0; lives = 3; t = 0; spawnT = 0; starT = 1.5; invuln = 0;
+    updateHud();
+  }
+  function updateHud() {
+    $score.textContent = Math.floor(score);
+    $lives.textContent = '♥'.repeat(lives) + '♡'.repeat(3 - lives);
+  }
+  function speedK() { return 1 + t / 25; }
+
+  function spawnMeteor() {
+    const r = 10 + Math.random() * 16;
+    things.push({ kind: 'm', x: r + Math.random() * (W - 2 * r), y: -r, r, vy: (120 + Math.random() * 80) * speedK(), vx: (Math.random() - .5) * 40, rot: Math.random() * 6 });
+  }
+  function spawnStar() {
+    things.push({ kind: 's', x: 20 + Math.random() * (W - 40), y: -12, r: 11, vy: 110 * Math.min(speedK(), 2), vx: 0, rot: 0 });
+  }
+  function burst(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 160;
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .6, color });
+    }
+  }
+
+  function update(dt) {
+    t += dt;
+    score += dt * 10;
+    // 이동
+    const acc = 2600, maxV = 380 + t * 3;
+    let dir = (keys.r ? 1 : 0) - (keys.l ? 1 : 0);
+    if (touchX !== null) { const d = touchX - player.x; dir = Math.abs(d) < 6 ? 0 : Math.sign(d); }
+    player.vx += dir * acc * dt;
+    if (!dir) player.vx *= Math.pow(0.0005, dt);
+    player.vx = Math.max(-maxV, Math.min(maxV, player.vx));
+    if (touchX !== null && Math.abs(touchX - player.x) < Math.abs(player.vx * dt)) { player.x = touchX; player.vx = 0; }
+    player.x += player.vx * dt;
+    if (player.x < player.r) { player.x = player.r; player.vx = 0; }
+    if (player.x > W - player.r) { player.x = W - player.r; player.vx = 0; }
+
+    // 생성
+    spawnT -= dt;
+    if (spawnT <= 0) { spawnMeteor(); spawnT = Math.max(.18, .75 - t * .012) * (.6 + Math.random() * .8); }
+    starT -= dt;
+    if (starT <= 0) { spawnStar(); starT = 2 + Math.random() * 2.5; }
+
+    // 충돌
+    if (invuln > 0) invuln -= dt;
+    for (const o of things) {
+      o.y += o.vy * dt; o.x += o.vx * dt; o.rot += dt * 2;
+      const dx = o.x - player.x, dy = o.y - player.y, hit = o.r * .8 + player.r * .75;
+      if (dx * dx + dy * dy < hit * hit) {
+        if (o.kind === 's') { o.dead = true; score += 50; burst(o.x, o.y, '#ffd45c', 14); }
+        else if (invuln <= 0) {
+          o.dead = true; lives--; invuln = 1.4; burst(player.x, player.y, '#ff7a59', 24);
+          if (navigator.vibrate) try { navigator.vibrate(80); } catch (e) {}
+          if (lives <= 0) return gameOver();
+        }
+      }
+    }
+    things = things.filter(o => !o.dead && o.y < H + 40);
+    for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 300 * dt; p.life -= dt; }
+    particles = particles.filter(p => p.life > 0);
+    updateHud();
+  }
+
+  function drawStarShape(x, y, r, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = rot + i * Math.PI / 5 - Math.PI / 2, rr = i % 2 ? r * .45 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    // 배경 별
+    for (const s of bg) {
+      if (running && !paused && !reduce) { s.y += s.s * 0.004 * speedK(); if (s.y > 1) { s.y = 0; s.x = Math.random(); } }
+      ctx.fillStyle = 'rgba(238,240,255,' + (0.3 + s.r * .3) + ')';
+      ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill();
+    }
+    // 물체
+    for (const o of things) {
+      if (o.kind === 'm') {
+        const g = ctx.createLinearGradient(o.x, o.y - o.r * 4, o.x, o.y);
+        g.addColorStop(0, 'rgba(255,122,89,0)'); g.addColorStop(1, 'rgba(255,122,89,.55)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.moveTo(o.x - o.r * .7, o.y); ctx.lineTo(o.x + o.r * .7, o.y); ctx.lineTo(o.x - o.vx * .05, o.y - o.r * 4); ctx.fill();
+        ctx.fillStyle = '#ff7a59';
+        ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, 7); ctx.fill();
+        ctx.fillStyle = '#c94a34';
+        ctx.beginPath(); ctx.arc(o.x - o.r * .3, o.y - o.r * .2, o.r * .28, 0, 7); ctx.arc(o.x + o.r * .35, o.y + o.r * .3, o.r * .18, 0, 7); ctx.fill();
+      } else {
+        ctx.fillStyle = '#ffd45c';
+        ctx.shadowColor = '#ffd45c'; ctx.shadowBlur = 14;
+        drawStarShape(o.x, o.y, o.r, o.rot); ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+    // 플레이어 (작은 로켓)
+    if (player && !(invuln > 0 && Math.floor(invuln * 10) % 2)) {
+      const { x, y, r } = player, tilt = player.vx / 1600;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(tilt);
+      ctx.fillStyle = '#ffb347';
+      ctx.beginPath(); ctx.moveTo(-6, r * .9); ctx.lineTo(0, r * .9 + 8 + Math.random() * 8); ctx.lineTo(6, r * .9); ctx.fill();
+      ctx.fillStyle = '#6c7bff';
+      ctx.beginPath(); ctx.moveTo(-r, r); ctx.lineTo(-r * .45, r * .2); ctx.lineTo(-r * .45, r); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r, r); ctx.lineTo(r * .45, r * .2); ctx.lineTo(r * .45, r); ctx.fill();
+      ctx.fillStyle = '#eef0ff';
+      ctx.beginPath(); ctx.moveTo(0, -r * 1.3); ctx.quadraticCurveTo(r * .75, -r * .2, r * .5, r); ctx.lineTo(-r * .5, r); ctx.quadraticCurveTo(-r * .75, -r * .2, 0, -r * 1.3); ctx.fill();
+      ctx.fillStyle = '#6c7bff';
+      ctx.beginPath(); ctx.arc(0, -r * .2, r * .26, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / .6);
+      ctx.fillStyle = p.color; ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function loop(now) {
+    const dt = Math.min(.05, (now - last) / 1000 || 0); last = now;
+    if (running && !paused) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function start() {
+    reset(); running = true; paused = false; ov.hidden = true;
+  }
+  function gameOver() {
+    running = false;
+    const s = Math.floor(score), isBest = s > best;
+    if (isBest) { best = s; $best.textContent = best; try { localStorage.setItem('meteor-best', best); } catch (e) {} }
+    updateHud();
+    ovTitle.textContent = isBest ? '새 최고 기록!' : '게임 오버';
+    ovText.innerHTML = '<span class="big">' + s + '점</span><br>' + Math.floor(t) + '초 버텼어요.';
+    btn.textContent = '다시 하기';
+    ov.hidden = false; btn.focus();
+  }
+  function togglePause() {
+    if (!running) return;
+    paused = !paused;
+    if (paused) { ovTitle.textContent = '일시정지'; ovText.textContent = 'P 키나 버튼을 누르면 이어서 해요.'; btn.textContent = '계속하기'; ov.hidden = false; }
+    else ov.hidden = true;
+  }
+
+  btn.addEventListener('click', () => { if (running && paused) togglePause(); else start(); });
+  addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { keys.l = true; e.preventDefault(); }
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { keys.r = true; e.preventDefault(); }
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') togglePause();
+    if ((e.key === ' ' || e.key === 'Enter') && !running && document.activeElement !== btn) start();
+  });
+  addEventListener('keyup', e => {
+    if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') keys.l = false;
+    if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') keys.r = false;
+  });
+  const setTouch = e => { const rect = cv.getBoundingClientRect(); touchX = e.clientX - rect.left; };
+  cv.addEventListener('pointerdown', e => { setTouch(e); cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointermove', e => { if (touchX !== null) setTouch(e); });
+  const endTouch = () => { touchX = null; };
+  cv.addEventListener('pointerup', endTouch); cv.addEventListener('pointercancel', endTouch);
+  addEventListener('blur', () => { keys.l = keys.r = false; if (running && !paused) togglePause(); });
+  addEventListener('resize', resize);
+
+  resize(); reset(); requestAnimationFrame(loop);
+})();
+</script>
