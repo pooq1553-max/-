@@ -1,0 +1,365 @@
+<title>민준이의 선택</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=Gowun+Dodum&display=swap">
+<style>
+/* 미연시 화면: 위 배경 장면 + 인물, 아래 대사창, 대사창 위에 선택지. 한 가지 화면 색으로 고정. */
+:root {
+  --night: #17141f;
+  --panel: rgba(23,20,31,.9);
+  --ink: #f4eef8;
+  --muted: #b3a8c2;
+  --pink: #ff8fb1;
+  --mint: #7fe0c4;
+  --gold: #ffd36e;
+  --font-display: "Do Hyeon", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "Gowun Dodum", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  background: var(--night); color: var(--ink); font-family: var(--font-body); font-size: 16px;
+  display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px; gap: 10px;
+}
+.top { display: flex; justify-content: space-between; align-items: center; gap: 10px; max-width: 720px; width: 100%; margin: 0 auto; flex-wrap: wrap; }
+.top h1 { font-family: var(--font-display); font-weight: 400; font-size: 1.5rem; margin: 0; }
+.top h1 span { color: var(--pink); }
+.stats { display: flex; gap: 12px; font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--ink); font-weight: 400; font-family: var(--font-display); font-size: 1.05rem; }
+.top button { font: inherit; font-size: .85rem; color: var(--muted); background: none; border: 1px solid #4a4058; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+
+#stage { position: relative; flex: 1; min-height: 0; max-width: 720px; width: 100%; margin: 0 auto; border-radius: 16px; overflow: hidden; transition: background .6s; }
+#place { position: absolute; top: 12px; left: 14px; font-size: .8rem; letter-spacing: .08em; color: rgba(255,255,255,.8); background: rgba(0,0,0,.28); padding: 4px 10px; border-radius: 999px; }
+#chapter { position: absolute; top: 12px; right: 14px; font-size: .8rem; color: rgba(255,255,255,.8); }
+#portrait { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); width: min(46%, 230px); aspect-ratio: 3/4; max-width: 100%; transition: opacity .35s; }
+#portrait svg { width: 100%; height: 100%; display: block; }
+
+#box { position: absolute; left: 10px; right: 10px; bottom: 10px; background: var(--panel); border: 1px solid #3a3148; border-radius: 14px; padding: 16px 18px 14px; min-height: 108px; cursor: pointer; }
+#name { position: absolute; top: -14px; left: 16px; font-family: var(--font-display); font-size: 1.05rem; padding: 2px 14px; border-radius: 8px; background: var(--pink); color: var(--night); }
+#name[hidden] { display: none; }
+#text { margin: 4px 0 0; line-height: 1.7; min-height: 3.4em; white-space: pre-line; }
+#text.narr { color: var(--muted); font-style: italic; }
+#more { position: absolute; right: 14px; bottom: 8px; color: var(--pink); font-size: .8rem; animation: bob 1s infinite; }
+@keyframes bob { 50% { transform: translateY(3px); } }
+
+#choices { position: absolute; left: 10px; right: 10px; bottom: 140px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; max-height: calc(100% - 190px); overflow-y: auto; }
+#choices button { font: inherit; text-align: left; color: var(--ink); background: rgba(40,33,53,.94); border: 1px solid #5b4d6e; border-radius: 12px; padding: 12px 16px; cursor: pointer; line-height: 1.5; }
+#choices button:hover, #choices button:focus-visible { border-color: var(--pink); background: rgba(70,45,72,.96); outline: none; }
+
+#end { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; background: rgba(15,12,20,.86); overflow-y: auto; }
+#end .tag { font-size: .8rem; letter-spacing: .12em; color: var(--muted); }
+#end h2 { font-family: var(--font-display); font-weight: 400; font-size: 2.2rem; margin: 0; text-wrap: balance; }
+#end p { margin: 0; max-width: 34ch; line-height: 1.7; color: var(--muted); }
+#end .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.btn { font-family: var(--font-display); font-size: 1.1rem; border: 0; border-radius: 999px; padding: 10px 24px; cursor: pointer; background: var(--pink); color: var(--night); }
+.btn.ghost { background: none; color: var(--ink); border: 1px solid #5b4d6e; }
+.btn:focus-visible, .top button:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+#gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; width: 100%; max-width: 460px; }
+#gallery div { border: 1px solid #3a3148; border-radius: 10px; padding: 8px; font-size: .82rem; color: var(--muted); }
+#gallery div.got { color: var(--ink); border-color: var(--gold); }
+@media (prefers-reduced-motion: reduce) { #more { animation: none; } }
+</style>
+
+<div class="top">
+  <h1>민준이의 <span>선택</span></h1>
+  <div class="stats" aria-label="현재 상태">
+    <span>통장 <b id="sMoney">0</b>만</span>
+    <span>자기관리 <b id="sCare">0</b></span>
+    <span>공감력 <b id="sHeart">0</b></span>
+  </div>
+  <button id="restart" type="button">처음부터</button>
+</div>
+
+<div id="stage">
+  <div id="place"></div>
+  <div id="chapter"></div>
+  <div id="portrait"></div>
+  <div id="choices"></div>
+  <div id="box" role="button" tabindex="0" aria-label="다음 대사">
+    <div id="name" hidden></div>
+    <p id="text"></p>
+    <span id="more">▼</span>
+  </div>
+  <div id="end" hidden>
+    <span class="tag" id="endTag"></span>
+    <h2 id="endTitle"></h2>
+    <p id="endText"></p>
+    <div class="row">
+      <button class="btn" id="again" type="button">다시 하기</button>
+    </div>
+    <span class="tag">모은 엔딩</span>
+    <div id="gallery"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+/* ---------- 배경 & 인물 ---------- */
+const BG = {
+  room:   ['원룸 · 밤', 'linear-gradient(#2a2340, #4a3550 70%, #2a2236)'],
+  office: ['회사 · 오후 6시', 'linear-gradient(#5c7a99, #a7b8c8 65%, #6d7f8f)'],
+  pub:    ['동네 술집', 'linear-gradient(#5a2e2a, #a0573c 70%, #4a2a22)'],
+  cafe:   ['카페', 'linear-gradient(#e7c9a5, #c9946a 70%, #8e6145)'],
+  club:   ['언어교환 모임', 'linear-gradient(#3f6e74, #7fb3a6 70%, #3b5d5c)'],
+  street: ['밤거리', 'linear-gradient(#1d2a4a, #4b3d6e 70%, #241d3a)'],
+  home:   ['신혼집', 'linear-gradient(#f2d6c4, #e3a99a 70%, #b77c75)'],
+  hanoi:  ['하노이', 'linear-gradient(#f0a35e, #e66b52 60%, #8c3b44)'],
+  parents:['본가 · 명절', 'linear-gradient(#c7b78f, #9b8661 70%, #6a5a3f)'],
+};
+const PEOPLE = {
+  '서윤': { hair: '#3a2420', skin: '#f6d7c3', top: '#ff8fb1', long: true },
+  '린':   { hair: '#141018', skin: '#ecc8a8', top: '#7fe0c4', long: true, bun: true },
+  '동현': { hair: '#222', skin: '#f0cfb4', top: '#6f8cff', long: false, glasses: true },
+  '엄마': { hair: '#4b3a34', skin: '#f1d0bb', top: '#c79a5b', long: false, perm: true },
+  '팀장': { hair: '#555', skin: '#eac6aa', top: '#555c6e', long: false, bald: true },
+};
+function portrait(who, mood) {
+  const p = PEOPLE[who]; if (!p) return '';
+  const mouth = mood === 'sad' ? 'M86 128 Q100 120 114 128' : mood === 'mad' ? 'M88 126 L112 126' : 'M86 122 Q100 134 114 122';
+  const brow = mood === 'mad' ? '<path d="M74 92 L92 98 M126 92 L108 98" stroke="#2a1d1a" stroke-width="3" stroke-linecap="round"/>' : '';
+  const tear = mood === 'sad' ? '<path d="M80 112 q-3 8 0 10 q3 -2 0 -10z" fill="#9fd3ff"/>' : '';
+  const blush = mood === 'love' ? '<ellipse cx="76" cy="118" rx="9" ry="5" fill="#ff8fb1" opacity=".6"/><ellipse cx="124" cy="118" rx="9" ry="5" fill="#ff8fb1" opacity=".6"/>' : '';
+  return `<svg viewBox="0 0 200 266" aria-hidden="true">
+    ${p.long ? `<path d="M48 90 Q44 200 60 230 L140 230 Q156 200 152 90 Z" fill="${p.hair}"/>` : ''}
+    <path d="M30 266 Q34 196 100 190 Q166 196 170 266 Z" fill="${p.top}"/>
+    <rect x="88" y="160" width="24" height="34" rx="8" fill="${p.skin}"/>
+    <ellipse cx="100" cy="108" rx="52" ry="60" fill="${p.skin}"/>
+    ${p.bald ? `<path d="M50 96 Q52 64 70 56 L70 84 Z M150 96 Q148 64 130 56 L130 84 Z" fill="${p.hair}"/>` :
+      p.perm ? `<circle cx="60" cy="70" r="20" fill="${p.hair}"/><circle cx="90" cy="54" r="22" fill="${p.hair}"/><circle cx="120" cy="54" r="22" fill="${p.hair}"/><circle cx="142" cy="72" r="20" fill="${p.hair}"/>` :
+      `<path d="M46 102 Q46 44 100 44 Q156 44 154 102 Q140 70 100 72 Q66 72 46 102 Z" fill="${p.hair}"/>`}
+    ${p.bun ? `<circle cx="100" cy="38" r="18" fill="${p.hair}"/>` : ''}
+    ${brow}
+    <ellipse cx="80" cy="104" rx="6" ry="${mood === 'love' ? 3 : 7}" fill="#2a1d1a"/>
+    <ellipse cx="120" cy="104" rx="6" ry="${mood === 'love' ? 3 : 7}" fill="#2a1d1a"/>
+    ${p.glasses ? '<circle cx="80" cy="104" r="14" fill="none" stroke="#222" stroke-width="3"/><circle cx="120" cy="104" r="14" fill="none" stroke="#222" stroke-width="3"/><path d="M94 104 H106" stroke="#222" stroke-width="3"/>' : ''}
+    ${blush}${tear}
+    <path d="${mouth}" stroke="#a24a4a" stroke-width="4" fill="none" stroke-linecap="round"/>
+  </svg>`;
+}
+
+/* ---------- 이야기 ----------
+   line: [화자, 대사, 표정]  화자 null = 내레이션, '나' = 주인공
+   fx: 상태 변화  m=통장(만원) c=자기관리 h=공감력 a=호감도 */
+const S = {
+  start: { bg: 'room', ch: '프롤로그', lines: [
+    [null, '김민준, 29살. 중소기업 3년차. 월급 280, 월세 50.'],
+    [null, '오늘도 퇴근하고 원룸에 들어와 불을 켠다.'],
+    ['나', '…금요일이다. 뭐 하지.'],
+  ], choices: [
+    { t: '밤새 게임 한다. 이번 시즌 다이아 간다.', fx: { c: -1 }, go: 'fri_game' },
+    { t: '헬스장 간다. 3개월 등록해 놓고 두 번 갔다.', fx: { c: 2, m: -5 }, go: 'fri_gym' },
+    { t: '동현이한테 연락해서 한잔한다.', fx: { h: 1, m: -4 }, go: 'pub' },
+  ]},
+  fri_game: { bg: 'room', lines: [
+    [null, '새벽 5시. 연패. 다이아는 멀어졌다.'],
+    ['나', '…이게 인생이지.'],
+    [null, '다음 날 오후, 동현이에게서 카톡이 온다.'],
+  ], next: 'pub' },
+  fri_gym: { bg: 'room', lines: [
+    [null, '오랜만에 쇠질을 했더니 팔이 안 올라간다. 그래도 기분은 좋다.'],
+    [null, '샤워하고 나오니 동현이에게서 카톡이 와 있다.'],
+  ], next: 'pub' },
+  pub: { bg: 'pub', ch: '1장 · 갈림길', who: '동현', lines: [
+    ['동현', '야 민준아. 너 언제까지 혼자 살 거냐.'],
+    ['나', '혼자가 편해. 돈도 없고.'],
+    ['동현', '내 와이프 회사 동료 있는데 소개팅 할래? 착하고 웃긴 사람이야.'],
+    ['동현', '아니면 우리 회사 사람들 다니는 언어교환 모임도 있어. 외국인 친구들 많아.'],
+  ], choices: [
+    { t: '소개팅? …그래, 한번 해보자.', fx: { h: 1 }, go: 'sy1' },
+    { t: '언어교환 모임 재밌겠다. 거기 가볼게.', fx: { h: 1 }, go: 'ln1' },
+    { t: '됐어. 연애는 사치야. 나는 내 방이 제일 좋아.', fx: { c: -1 }, go: 'solo1' },
+  ]},
+
+  /* ----- 혼자 루트 ----- */
+  solo1: { bg: 'room', ch: '혼자의 길', lines: [
+    [null, '1년이 지났다. 배달앱 VIP 등급이 올라갔다.'],
+    [null, '주말엔 게임, 평일엔 회사. 대화 상대는 편의점 사장님뿐.'],
+    ['동현', '(카톡) 야 그 언어교환 모임 아직 해. 이번 주 올래?'],
+  ], choices: [
+    { t: '…한 번만 가볼까.', fx: { h: 1, c: 1 }, go: 'ln1' },
+    { t: '읽씹한다. 랭크 게임 큐가 잡혔다.', fx: { c: -2 }, go: 'solo2' },
+  ]},
+  solo2: { bg: 'room', lines: [
+    [null, '또 시간이 흘렀다. 거울 속 배가 나왔다.'],
+    [null, '동현이 결혼식, 회사 동기 돌잔치. 축의금 봉투만 늘어간다.'],
+    ['나', '세상이 문제야. 내 탓은 아니야.'],
+    [null, '그 말을 할 때마다 방은 조금씩 더 좁아졌다.'],
+  ], end: 'solo' },
+
+  /* ----- 서윤 루트 ----- */
+  sy1: { bg: 'cafe', ch: '2장 · 서윤', who: '서윤', lines: [
+    ['서윤', '안녕하세요! 동현 씨한테 얘기 많이 들었어요.'],
+    ['서윤', '저 요즘 회사에서 프로젝트 하나 맡았는데, 너무 정신없어서요. 하하.'],
+  ], choices: [
+    { t: '"어떤 프로젝트예요?" 눈 맞추고 끝까지 들어준다.', fx: { a: 2, h: 1 }, go: 'sy2' },
+    { t: '"아 저도 바빠요. 근데 저 게임 랭킹이…" 30분 동안 내 얘기.', fx: { a: -1 }, go: 'sy2' },
+    { t: '"요즘 여자들은 다 일 핑계 대던데." 하고 떠본다.', fx: { a: -3, h: -1 }, go: 'sy1x' },
+  ]},
+  sy1x: { bg: 'cafe', who: '서윤', mood: 'mad', lines: [
+    ['서윤', '…네? 저 처음 보는 사이에 그런 말 들을 이유는 없는 것 같은데요.'],
+    [null, '서윤은 커피를 반도 안 마시고 일어났다. 동현이에게 욕을 바가지로 먹었다.'],
+  ], next: 'solo1' },
+  sy2: { bg: 'street', who: '서윤', lines: [
+    [null, '연애 석 달째. 오늘은 100일이다.'],
+    ['서윤', '(전화) 민준아 진짜 미안해… 갑자기 야근이 잡혀서 오늘 못 갈 것 같아.', 'sad'],
+  ], choices: [
+    { t: '"괜찮아. 대신 끝나면 회사 앞으로 떡볶이 사 갈게."', fx: { a: 2, h: 1, m: -2 }, go: 'sy3' },
+    { t: '"100일인데? 나보다 회사가 중요해?" 문자 20통.', fx: { a: -2 }, go: 'sy3' },
+    { t: '"응" 하고 혼자 삐져서 일주일 연락 안 한다.', fx: { a: -1 }, go: 'sy3' },
+  ]},
+  sy3: { bg: 'cafe', ch: '3장 · 결혼 준비', who: '서윤', lines: [
+    [null, '2년 후. 우리는 결혼하기로 했다. 문제는 집이다.'],
+    ['서윤', '서울 전세는 너무 비싸더라. 우리 둘이 모은 거 합치면 얼마나 될까?'],
+  ], choices: [
+    { t: '엑셀 켜고 같이 예산 짠다. 둘이 반씩 + 대출, 경기도 신축으로.', fx: { a: 2, h: 1, m: -20 }, go: 'sy4' },
+    { t: '"집은 남자가 해야지." 혼자 영끌해서 대출 3억.', fx: { a: -1, m: -150 }, go: 'sy4' },
+    { t: '"우리 엄마한테 물어볼게." 모든 결정을 엄마에게 넘긴다.', fx: { a: -2 }, go: 'sy4' },
+  ]},
+  sy4: { bg: 'home', ch: '4장 · 신혼', who: '서윤', lines: [
+    [null, '신혼 1년 차. 둘 다 맞벌이다. 오늘도 둘 다 9시 넘어 퇴근했다.'],
+    ['서윤', '설거지 쌓인 거 봤어…? 빨래도 이틀째야.', 'sad'],
+  ], choices: [
+    { t: '집안일 분담표를 같이 만든다. 나는 설거지·분리수거 담당.', fx: { a: 2, h: 1 }, go: 'syEnd' },
+    { t: '"말하지, 도와줄게~" (도와준다는 말이 문제라는 걸 모른다)', fx: { a: -1 }, go: 'syEnd' },
+    { t: '못 들은 척 헤드셋 쓰고 게임 접속.', fx: { a: -3 }, go: 'syEnd' },
+  ]},
+  syEnd: { bg: 'home', lines: [[null, '그리고 몇 년 뒤…']], branch: () => st.a >= 5 ? 'sy_good' : 'sy_bad' },
+
+  /* ----- 린 루트 ----- */
+  ln1: { bg: 'club', ch: '2장 · 린', who: '린', lines: [
+    [null, '언어교환 모임. 옆자리에 하노이에서 온 대학원생 린이 앉았다.'],
+    ['린', '안녕하세요! 저는 린이에요. 한국어 공부한 지 3년 됐어요. 반가워요!'],
+  ], choices: [
+    { t: '미리 외워 온 "씬 짜오(Xin chào)!"로 인사한다.', fx: { a: 2, h: 1 }, go: 'ln2' },
+    { t: '"한국말 잘하시네요. 근데 비자는 뭐예요? 계속 사실 거예요?"', fx: { a: -2 }, go: 'ln2' },
+    { t: '긴장해서 휴대폰만 본다.', fx: { a: -1 }, go: 'ln2' },
+  ]},
+  ln2: { bg: 'hanoi', ch: '3장 · 뗏(설날)', who: '린', lines: [
+    [null, '사귄 지 1년. 베트남 설날 "뗏"이 다가온다.'],
+    ['린', '민준, 이번 뗏에 우리 가족 만나러 같이 갈래? 엄마가 꼭 보고 싶대.', 'love'],
+  ], choices: [
+    { t: '연차 쓰고 같이 간다. 비행기에서 베트남어 인사말 연습.', fx: { a: 2, h: 1, m: -80 }, go: 'ln3' },
+    { t: '"회사 때문에 안 돼." 영상통화도 귀찮아서 대충.', fx: { a: -2 }, go: 'ln3' },
+  ]},
+  ln3: { bg: 'parents', ch: '4장 · 명절', who: '엄마', lines: [
+    [null, '결혼 후 첫 추석. 본가에 왔다.'],
+    ['엄마', '린아, 전은 이렇게 부치는 거야. 그리고 베트남 음식은 우리 집에선 좀 그렇다.', 'mad'],
+    [null, '린이 조용히 고개를 숙인다.'],
+  ], choices: [
+    { t: '"엄마, 린 방식도 하나 해보자. 쌀국수 진짜 맛있어." 중간에서 다리를 놓는다.', fx: { a: 2, h: 2 }, go: 'ln4' },
+    { t: '"엄마 말 들어. 여긴 한국이잖아."', fx: { a: -3 }, go: 'ln4' },
+    { t: '거실에서 TV만 본다.', fx: { a: -1 }, go: 'ln4' },
+  ]},
+  ln4: { bg: 'home', ch: '5장 · 린의 꿈', who: '린', lines: [
+    ['린', '나 졸업하면 한국 회사에서 통번역 일 하고 싶어. 할 수 있을까?'],
+  ], choices: [
+    { t: '"당연하지." 이력서 같이 고치고 면접 연습 상대 해준다.', fx: { a: 2, h: 1 }, go: 'lnEnd' },
+    { t: '"그냥 집에 있으면 안 돼? 내가 벌잖아."', fx: { a: -3 }, go: 'lnEnd' },
+  ]},
+  lnEnd: { bg: 'home', lines: [[null, '그리고 몇 년 뒤…']], branch: () => st.a >= 5 ? 'ln_good' : 'ln_bad' },
+};
+
+const ENDS = {
+  solo:    { tag: 'ENDING 1', title: '방구석 만렙 엔딩', bg: 'room',
+             text: '42살. 원룸 그대로, 게임 계정은 그랜드마스터. 고독사 보험 광고가 유난히 자주 뜬다. 세상 탓만 하는 사이 기회는 몇 번이나 지나갔다.' },
+  sy_bad:  { tag: 'ENDING 2-A', title: '파국 엔딩', bg: 'street', who: '서윤', mood: 'sad',
+             text: '말 대신 한숨이, 대화 대신 카톡 읽씹이 늘었다. 결국 각자의 짐을 쌌다. 대출은 반으로 나눴지만 상처는 나눌 수가 없었다. 누가 빼앗아 간 게 아니라 같이 무너뜨린 거였다.' },
+  sy_good: { tag: 'ENDING 2-B', title: '같이 늙어가는 엔딩', bg: 'home', who: '서윤', mood: 'love',
+             text: '설거지 당번은 여전히 민준. 대출은 아직 20년 남았지만, 퇴근길에 "오늘 뭐 먹지?" 물어볼 사람이 있다. 그거면 충분했다.' },
+  ln_bad:  { tag: 'ENDING 3-A', title: '말이 끊긴 엔딩', bg: 'street', who: '린', mood: 'sad',
+             text: '린은 한국어를 3년 배웠는데 민준은 린의 마음을 하루도 배우지 않았다. 린은 하노이로 돌아갔다. 같은 언어로 말해도 통하지 않는다는 걸 너무 늦게 알았다.' },
+  ln_good: { tag: 'ENDING 3-B', title: '두 나라 한 가족 엔딩', bg: 'hanoi', who: '린', mood: 'love',
+             text: '린은 통번역사가 됐고, 민준의 베트남어는 장모님과 농담할 정도가 됐다. 추석엔 전, 뗏엔 반쯩. 식탁이 두 배로 넓어졌다.' },
+};
+const END_ORDER = ['solo', 'sy_bad', 'sy_good', 'ln_bad', 'ln_good'];
+
+/* ---------- 엔진 ---------- */
+const $ = id => document.getElementById(id);
+const stage = $('stage'), box = $('box'), nameEl = $('name'), textEl = $('text'), more = $('more'), choicesEl = $('choices'), pt = $('portrait');
+let st, scene, idx, typing = null, full = '';
+let got = [];
+try { got = JSON.parse(localStorage.getItem('mj-endings') || '[]'); } catch (e) {}
+
+function hud() {
+  $('sMoney').textContent = st.m; $('sCare').textContent = st.c; $('sHeart').textContent = st.h;
+}
+function setBg(k) { const b = BG[k]; $('place').textContent = b[0]; stage.style.background = b[1]; }
+function show(who, mood) {
+  const html = portrait(who, mood);
+  pt.innerHTML = html; pt.style.opacity = html ? 1 : 0;
+}
+
+function go(id) {
+  scene = S[id]; idx = 0;
+  setBg(scene.bg);
+  if (scene.ch) $('chapter').textContent = scene.ch;
+  choicesEl.innerHTML = '';
+  line();
+}
+function line() {
+  const [who, txt, mood] = scene.lines[idx];
+  const speaker = who && who !== '나' ? who : null;
+  if (speaker) show(speaker, mood); else if (idx === 0) show(scene.who, scene.mood);
+  nameEl.hidden = !who; nameEl.textContent = who === '나' ? '민준' : who || '';
+  nameEl.style.background = who === '나' ? 'var(--gold)' : who === '린' ? 'var(--mint)' : 'var(--pink)';
+  textEl.className = who ? '' : 'narr';
+  type(txt);
+}
+function type(txt) {
+  full = txt; clearInterval(typing); more.hidden = true;
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { textEl.textContent = txt; return done(); }
+  let i = 0; textEl.textContent = '';
+  typing = setInterval(() => { i++; textEl.textContent = txt.slice(0, i); if (i >= txt.length) done(); }, 28);
+}
+function done() {
+  clearInterval(typing); typing = null; textEl.textContent = full;
+  const last = idx === scene.lines.length - 1;
+  if (last && scene.choices) { more.hidden = true; renderChoices(); }
+  else more.hidden = false;
+}
+function advance() {
+  if (!scene || !$('end').hidden) return;
+  if (typing) return done();
+  if (choicesEl.children.length) return;
+  if (idx < scene.lines.length - 1) { idx++; return line(); }
+  if (scene.end) return ending(scene.end);
+  if (scene.branch) return ending(scene.branch());
+  if (scene.next) return go(scene.next);
+}
+function renderChoices() {
+  choicesEl.innerHTML = '';
+  scene.choices.forEach(c => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = c.t;
+    b.onclick = e => {
+      e.stopPropagation();
+      for (const k in (c.fx || {})) st[k] += c.fx[k];
+      hud(); choicesEl.innerHTML = ''; go(c.go);
+    };
+    choicesEl.appendChild(b);
+  });
+  choicesEl.firstChild && choicesEl.firstChild.focus();
+}
+function ending(id) {
+  const e = ENDS[id];
+  setBg(e.bg); show(e.who, e.mood);
+  if (!got.includes(id)) { got.push(id); try { localStorage.setItem('mj-endings', JSON.stringify(got)); } catch (err) {} }
+  $('endTag').textContent = e.tag; $('endTitle').textContent = e.title; $('endText').textContent = e.text;
+  $('gallery').innerHTML = END_ORDER.map(k => got.includes(k)
+    ? `<div class="got">${ENDS[k].tag}<br>${ENDS[k].title}</div>` : `<div>${ENDS[k].tag}<br>???</div>`).join('');
+  $('end').hidden = false; $('again').focus();
+}
+function restart() {
+  st = { m: 1200, c: 0, h: 0, a: 0 };
+  $('end').hidden = true; $('chapter').textContent = ''; hud(); go('start');
+}
+
+box.addEventListener('click', advance);
+box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); advance(); } });
+addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && document.activeElement === document.body) { e.preventDefault(); advance(); } });
+$('again').onclick = restart; $('restart').onclick = restart;
+restart();
+})();
+</script>
